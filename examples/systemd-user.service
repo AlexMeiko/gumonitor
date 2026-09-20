@@ -1,0 +1,32 @@
+# gumonitor 的 systemd **用户**服务模板（参考实现，不是必须的）
+#
+# 装法（不需要 root）：
+#   mkdir -p ~/.config/systemd/user
+#   cp examples/systemd-user.service ~/.config/systemd/user/gumonitor.service
+#   # 按你的实际路径改下面的 %h/gumonitor，或者直接用（%h = 当前用户家目录）
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now gumonitor.service
+#
+# 想让它在没人登录时也自启：sudo loginctl enable-linger "$USER"
+#
+# 不是 systemd 的系统（OpenRC / runit / s6 / SysVinit）照样能跑，
+# 服务本身只是 `python3 server.py` 一个前台进程 —— 见 README 的「部署」。
+
+[Unit]
+Description=gumonitor — device telemetry web service
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/gumonitor
+ExecStart=/usr/bin/python3 %h/gumonitor/server.py
+Environment=V30_PORT=8090
+Environment=V30_INTERVAL=1.0
+Environment=V30_HISTORY=300
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

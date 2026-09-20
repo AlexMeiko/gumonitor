@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F2F2F7">
+<title>v30 Monitor</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <div id="offline" class="offline">Disconnected from device, retrying…</div>
+
+  <section id="home" class="view">
+    <header class="topbar">
+      <div class="group">
+        <button class="iconbtn" id="btnSettings" title="Settings"></button>
+        <button class="iconbtn" id="btnAlerts" title="Alerts"></button>
+      </div>
+      <h1 class="page-title">Monitor</h1>
+      <div class="group right">
+        <button class="iconbtn" id="btnHistory" title="5-Minute Stats"></button>
+        <button class="iconbtn" id="btnExport" title="Export JSON"></button>
+      </div>
+    </header>
+
+    <div class="device-card card">
+      <div class="head">
+        <div>
+          <h2 id="devName">v30</h2>
+          <p class="model" id="devModel">LG V30</p>
+        </div>
+        <span class="health" id="devHealth"></span>
+      </div>
+      <p class="conn" id="devConn"></p>
+      <div class="stats">
+        <div class="stat">
+          <div class="label" id="lblUptime"></div>
+          <div class="value" id="valUptime">—</div>
+        </div>
+        <div class="stat">
+          <div class="label" id="lblServices"></div>
+          <div class="value" id="valServices">—</div>
+        </div>
+        <div class="stat">
+          <div class="label" id="lblIp"></div>
+          <div class="value" id="valIp">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h3>Live Telemetry</h3>
+      <span class="live-dot"></span>
+      <span class="spacer"></span>
+      <button class="ghostbtn" id="btnRefresh" title="Refresh now"></button>
+    </div>
+
+    <div class="grid" id="tileGrid"></div>
+  </section>
+
+  <section id="detail" class="detail" aria-hidden="true"></section>
+
+  <div class="sheet-mask" id="sheetMask"></div>
+  <div class="sheet" id="sheet"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

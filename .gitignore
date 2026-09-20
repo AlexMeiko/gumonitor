@@ -1,0 +1,26 @@
+# 本机部署配置：含内网地址与账号密码，只在你自己的机器上用
+deploy.sh
+deploy.local.sh
+
+# 工作区（真机快照、截图、Edge/Playwright 用户数据、开发笔记）
+.workbuddy/
+.Trash-*/
+
+# 测试产物
+tests/shots/
+tests/.tmp/
+tests/state.json
+
+# 依赖。注意要写两遍：`node_modules/` 只匹配目录，
+# 本地为了共享依赖常把它做成**符号链接**，那种情况只有不带斜杠的模式才能命中。
+node_modules/
+node_modules
+
+# Python
+__pycache__/
+*.py[cod]
+
+# 杂项
+*.zip
+*.bak
+.DS_Store

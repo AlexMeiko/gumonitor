@@ -1,0 +1,13 @@
+{
+  "name": "gumonitor-tests",
+  "private": true,
+  "description": "gumonitor 前端端到端回归（Playwright + 本机已装的浏览器，不下载 Chromium）",
+  "scripts": {
+    "test": "node verify.mjs",
+    "tiles": "node probe-tiles.mjs",
+    "badge": "node probe-badge.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}
