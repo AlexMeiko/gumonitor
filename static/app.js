@@ -1039,20 +1039,8 @@ function openDetail(id) {
   chartCard.style.background = chartBg(spec.color);
   body.appendChild(chartCard);
 
-  // 图例要紧跟主图 —— 放在第二张图后面会被隔开，读到图例时已经不知道它指哪张图了
-  if (spec.legend) {
-    const lg = h('div', 'chart-axis');
-    lg.style.justifyContent = 'flex-start';
-    lg.style.gap = '14px';
-    lg.innerHTML = spec.legend.map((l) =>
-      `<span style="display:inline-flex;align-items:center;gap:5px">
-        <i style="width:8px;height:8px;border-radius:9px;background:${COLORS[l.color]};display:inline-block"></i>${l.text}</span>`
-    ).join('');
-    body.appendChild(lg);
-  }
-
   // 第二张图（可选）：比如 Battery 页的电流。mA 和 W 差两个数量级，
-  // 不能和功率挤在一张图里，所以单独一张矮图，排在图例之后。
+  // 不能和功率挤在一张图里，所以单独一张矮图。
   if (spec.miniChart) {
     body.appendChild(h('div', 'sub-title', spec.miniChart.title));
     const extraCard = h('div', 'chart-card');
@@ -1110,6 +1098,15 @@ function openDetail(id) {
 
   view.appendChild(body);
   chartCards.main = createChart(chartCard, { height: 168 });
+
+  // 图例压在主图右上角。**必须放在 createChart 之后** —— 那个函数会
+  // host.innerHTML = ''，先加的会被抹掉。
+  if (spec.legend) {
+    const lg = h('div', 'chart-legend');
+    lg.innerHTML = spec.legend.map((l) =>
+      `<span><i style="background:${COLORS[l.color] || l.color}"></i>${l.text}</span>`).join('');
+    chartCard.appendChild(lg);
+  }
 
   $('#dClose', view).addEventListener('click', closeDetail);
   $('#dGear', view).addEventListener('click', openSettings);

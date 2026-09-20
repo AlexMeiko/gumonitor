@@ -522,7 +522,7 @@ console.log('Edge version =', browser.version(), '\n');
   const dual = await page.evaluate(() => {
     const svg = document.querySelector('#detail .chart-card .chart-svg');
     const strokes = [...svg.querySelectorAll('path[stroke]')].map((p) => p.getAttribute('stroke'));
-    const legend = [...document.querySelectorAll('#detail .chart-axis[style*="flex-start"] span')]
+    const legend = [...document.querySelectorAll('#detail .chart-legend span')]
       .map((e) => e.textContent.trim());
     return { paths: strokes.length, uniq: [...new Set(strokes)], legend };
   });
@@ -531,19 +531,32 @@ console.log('Edge version =', browser.version(), '\n');
         `${dual.paths} 条 · ${dual.uniq.join(' / ')}`);
   check('图例区分 System / Battery',
         dual.legend.join('/') === 'System/Battery', dual.legend.join(' / '));
-  // 图例必须在第二张图**之前**，否则读到图例时已经看不出它指哪张图
-  const order = await page.evaluate(() => {
-    const kids = [...document.querySelector('#detail .detail-body').children];
-    const isLegend = (e) => e.classList.contains('chart-axis') &&
-      (e.getAttribute('style') || '').includes('flex-start');
+
+  // 图例是压在图表右上角的气泡：在卡片内、贴右上、absolute 不占布局、
+  // 且 pointer-events:none（否则会挡住它下面那块曲线的点选）
+  const lgPos = await page.evaluate(() => {
+    const lg = document.querySelector('#detail .chart-legend');
+    const card = document.querySelector('#detail .chart-card');
+    const a = lg.getBoundingClientRect();
+    const b = card.getBoundingClientRect();
+    const sw = lg.querySelector('i');
     return {
-      legend: kids.findIndex(isLegend),
-      charts: kids.map((e, i) => (e.classList.contains('chart-card') ? i : -1)).filter((i) => i >= 0),
+      inCard: a.left >= b.left - 0.5 && a.right <= b.right + 0.5 &&
+              a.top >= b.top - 0.5 && a.bottom <= b.bottom + 0.5,
+      rightGap: b.right - a.right,
+      topGap: a.top - b.top,
+      position: getComputedStyle(lg).position,
+      pe: getComputedStyle(lg).pointerEvents,
+      swatch: sw ? parseFloat(getComputedStyle(sw).width) : 0,
     };
   });
-  check('图例紧跟主图（排在第二张图之前）',
-        order.legend > 0 && order.charts.length === 2 && order.legend < order.charts[1],
-        `legend@${order.legend} charts@${order.charts.join(',')}`);
+  check('图例在图表卡右上角（绝对定位、不溢出）',
+        lgPos.inCard && lgPos.position === 'absolute' &&
+        lgPos.rightGap < 24 && lgPos.topGap < 24,
+        `rightGap=${lgPos.rightGap.toFixed(0)} topGap=${lgPos.topGap.toFixed(0)} pos=${lgPos.position}`);
+  check('图例不挡点选，且每项有可见的线段样例',
+        lgPos.pe === 'none' && lgPos.swatch >= 8,
+        `pointer-events=${lgPos.pe} swatch=${lgPos.swatch}px`);
 
   // 气泡要同时给出两根线的值（hover 触发）
   const svgBox = await page.locator('#detail .chart-card .chart-svg').first().boundingBox();
