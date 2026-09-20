@@ -370,11 +370,13 @@ function drawChart(inst, spec, series, meta) {
 
   // 值域提示：tight 模式下 y 轴不锚定 0，画一条贴顶的曲线会让人高估波动幅度，
   // 所以在左上角标出这 5 分钟的实际数值范围。
+  // y 取 padT-3：正好落在**绘图区上沿之上**（不压曲线），同时贴着卡片顶边 ——
+  // 右侧的图例气泡就对齐这一行（见 .chart-legend 的 top）。
   if (!inst.mini && spec.tight) {
     const dmin = Math.min(...all);
     const dmax = Math.max(...all);
     const fmtR = spec.format || ((v) => String(v));
-    out += `<text x="${(padL + 2).toFixed(1)}" y="${(padT + 9).toFixed(1)}" ` +
+    out += `<text x="${(padL + 2).toFixed(1)}" y="${(padT - 3).toFixed(1)}" ` +
            `font-size="10" font-weight="600" fill="${COLORS.gray}" opacity="0.9">` +
            `${fmtR(dmin)} – ${fmtR(dmax)}</text>`;
   }

@@ -446,7 +446,8 @@ body { display: flex; justify-content: center; }
 .chart-card {
   position: relative;
   border-radius: var(--radius-tile);
-  padding: 16px 12px 8px;
+  /* 上内边距小一点：值域角标和图例要贴着顶边，留 16px 会让它们离得太远 */
+  padding: 12px 12px 8px;
   overflow: hidden;
   margin-bottom: 18px;
   /* 横向拖动 = 选点，纵向留给页面滚动（不写的话触屏横拖会被浏览器吃掉） */
@@ -464,6 +465,8 @@ body { display: flex; justify-content: center; }
 }
 .chart-tip {
   position: absolute;
+  /* 盖在图例之上：图例是后 append 的，不给 z-index 的话气泡会被它压住 */
+  z-index: 2;
   transform: translate(-50%, -100%);
   background: #fff;
   border-radius: 11px;
@@ -506,9 +509,11 @@ body { display: flex; justify-content: center; }
 .chart-legend {
   position: absolute;
   right: 10px;
-  /* 与左上角的数值范围角标（tight 模式下 SVG 里画的 "0.65 W – 4.36 W"）同一行：
-     角标基线在 svg 内 padT+9 = 21px，卡片有 16px 上内边距，所以中心约在 33px */
-  top: 21px;
+  /* 与左上角的数值范围角标（tight 模式下 SVG 里画的 "0.54 W – 4.46 W"）同一行。
+     角标基线在 svg 内 padT-3 = 9px，卡片上内边距 12px → 视觉中线约卡片 17px；
+     本图例高 23px，所以 top = 17 - 23/2 ≈ 6px。改任何一侧记得两边一起动。 */
+  top: 6px;
+  z-index: 1;
   display: flex;
   flex-direction: row;
   align-items: center;

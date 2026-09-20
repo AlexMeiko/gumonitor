@@ -594,6 +594,21 @@ console.log('Edge version =', browser.version(), '\n');
   check('图例不压住左侧角标', rowAlign.legendLeft > rowAlign.labelRight,
         `角标右边 ${rowAlign.labelRight.toFixed(0)} < 图例左边 ${rowAlign.legendLeft.toFixed(0)}`);
 
+  // 图例底边与最靠上的那条曲线之间要有余量。
+  // 之前两者只差 ~1px，看着像"贴在一起"，而离上边框还留着 21px。
+  const gap = await page.evaluate(() => {
+    const card = document.querySelector('#detail .chart-card');
+    const svg = card.querySelector('.chart-svg');
+    const sRect = svg.getBoundingClientRect();
+    const legendBottom = card.querySelector('.chart-legend').getBoundingClientRect().bottom;
+    const tops = [...svg.querySelectorAll('path[stroke]')]
+      .map((p) => sRect.top + p.getBBox().y);
+    return { gap: Math.min(...tops) - legendBottom, cardTopGap: card.querySelector('.chart-legend')
+      .getBoundingClientRect().top - card.getBoundingClientRect().top };
+  });
+  check('图例与上方曲线留有余量（不贴在一起）', gap.gap >= 6,
+        `间距 ${gap.gap.toFixed(1)}px，距卡片顶 ${gap.cardTopGap.toFixed(1)}px`);
+
   // 气泡要同时给出两根线的值（hover 触发）
   const svgBox = await page.locator('#detail .chart-card .chart-svg').first().boundingBox();
   await page.mouse.move(svgBox.x + svgBox.width * 0.5, svgBox.y + svgBox.height * 0.5);
