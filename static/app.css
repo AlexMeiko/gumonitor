@@ -506,21 +506,24 @@ body { display: flex; justify-content: center; }
 .chart-legend {
   position: absolute;
   right: 10px;
-  top: 8px;
+  /* 与左上角的数值范围角标（tight 模式下 SVG 里画的 "0.65 W – 4.36 W"）同一行：
+     角标基线在 svg 内 padT+9 = 21px，卡片有 16px 上内边距，所以中心约在 33px */
+  top: 21px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 5px 9px;
-  border-radius: 10px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 8px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, .88);
   box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.4;
   color: var(--text2);
   white-space: nowrap;
   pointer-events: none;
 }
-.chart-legend span { display: flex; align-items: center; gap: 6px; }
+.chart-legend span { display: flex; align-items: center; gap: 5px; }
 .chart-legend i {
   display: inline-block;
   flex: none;

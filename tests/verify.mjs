@@ -476,6 +476,16 @@ console.log('Edge version =', browser.version(), '\n');
         trTitle === 'Traffic' && (findRow(trRows, 'Wi-Fi Network')?.v || '') !== '' &&
         !!findRow(trRows, 'Signal'),
         `${findRow(trRows, 'Wi-Fi Network')?.v} · ${findRow(trRows, 'Signal')?.v}`);
+  // 双线页共用同一个图例组件，顺手确认它也是单行
+  const trLegend = await page.evaluate(() => {
+    const lg = document.querySelector('#detail .chart-legend');
+    return lg ? { rows: new Set([...lg.querySelectorAll('span')]
+      .map((s) => s.getBoundingClientRect().top)).size, h: lg.getBoundingClientRect().height } : null;
+  });
+  check('Traffic 的图例（Download / Upload）也是单行',
+        !!trLegend && trLegend.rows === 1 && trLegend.h < 32,
+        trLegend ? `${trLegend.rows} 行 · 高 ${trLegend.h.toFixed(0)}px` : '(无图例)');
+  await page.screenshot({ path: path.join(OUT, 'pw-detail-traffic.png') });
   await closeTile();
 
   const nqTitle = await openTile(6);
@@ -557,6 +567,32 @@ console.log('Edge version =', browser.version(), '\n');
   check('图例不挡点选，且每项有可见的线段样例',
         lgPos.pe === 'none' && lgPos.swatch >= 8,
         `pointer-events=${lgPos.pe} swatch=${lgPos.swatch}px`);
+
+  // 图例要压成**一行**，并且和左侧的数值范围角标对齐在同一水平线
+  const rowAlign = await page.evaluate(() => {
+    const svg = document.querySelector('#detail .chart-card .chart-svg');
+    const label = [...svg.querySelectorAll('text')].find((t) => t.textContent.includes('\u2013'));
+    const lg = document.querySelector('#detail .chart-legend');
+    const spans = [...lg.querySelectorAll('span')];
+    const a = label.getBoundingClientRect();
+    const b = lg.getBoundingClientRect();
+    return {
+      labelMid: (a.top + a.bottom) / 2,
+      legendMid: (b.top + b.bottom) / 2,
+      labelRight: a.right,
+      legendLeft: b.left,
+      legendH: b.height,
+      sameRow: spans.every((s) => Math.abs(s.getBoundingClientRect().top - spans[0].getBoundingClientRect().top) < 1),
+      labelText: label.textContent,
+    };
+  });
+  check('图例压成一行', rowAlign.sameRow && rowAlign.legendH < 32,
+        `高度 ${rowAlign.legendH.toFixed(0)}px`);
+  check('图例与左侧数值范围角标在同一行',
+        Math.abs(rowAlign.labelMid - rowAlign.legendMid) < 5,
+        `角标中线 ${rowAlign.labelMid.toFixed(0)} / 图例中线 ${rowAlign.legendMid.toFixed(0)}（"${rowAlign.labelText}"）`);
+  check('图例不压住左侧角标', rowAlign.legendLeft > rowAlign.labelRight,
+        `角标右边 ${rowAlign.labelRight.toFixed(0)} < 图例左边 ${rowAlign.legendLeft.toFixed(0)}`);
 
   // 气泡要同时给出两根线的值（hover 触发）
   const svgBox = await page.locator('#detail .chart-card .chart-svg').first().boundingBox();
