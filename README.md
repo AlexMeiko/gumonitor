@@ -73,7 +73,7 @@ UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页�
 | Traffic | `/proc/net/dev` wlan0 差值 | 下载/上传双折线 + 累计收发 + IP + **WiFi 链路**（SSID/信号/信道/协商速率，来自 `nmcli`）|
 | Storage I/O | `/proc/diskstats` 的 `sda`（UFS）差值 | 读/写双折线 + IOPS + 繁忙% + 累计读写 |
 | Link Quality | `/proc/net/snmp` 的 `Tcp:` + `wlan0/statistics` | 重传率折线 + TCP 连接数 + 丢包/错包/断连次数 |
-| Battery | `fuel-gauge`（pmi8998-fg）+ `pmi8998-charger` | 功率折线 + 电流副图 + 状态/电压/电流 + **充电详情** + 温度/健康度/估算续航 |
+| Battery | `fuel-gauge`（pmi8998-fg）+ `pmi8998-charger` | **功率双折线（整机 + 电池端）** + 电流副图 + 状态/电压/电流 + **充电详情** + 温度/健康度/估算续航 |
 | System Load | `/proc/loadavg`、`/proc/pressure`、`systemctl` | load 折线 + 内核/系统/服务数 + Top5 进程 |
 
 此外 Memory 详情页带 **Zram**（压缩比/节省量/交换速率），Temperature 详情页带
@@ -112,6 +112,15 @@ UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页�
 配套的 `Charging Efficiency = 充入电池 / 输入` 就是把这个损耗量化出来。
 
 界面上两个数分开列：`System Power`（整机）与 `Battery Power`（电池端），避免混为一谈。
+
+Battery 详情页把这两个量画在**同一张图**上（黄 = System，绿 = Battery），
+因为它们的关系本身就是信息：
+
+* **放电时两条线几乎重合** —— 电池就是整机唯一的电源，这很正常，不是画错了；
+* **充电时两条线分开**，而且分开的方向相反：电池端在充入（数值大），整机只占输入的一小部分。
+  实测充电中：电池端 `4.34 W`、整机 `0.65 W`、输入 `4.99 W` —— 效率 87%；
+* **插电但充电被抑制时**（`inhibit-charge`），电池端接近 0 而整机不为 0 ——
+  一眼就能看出"电是 USB 在供，不是电池在放"。
 
 ### Power Draw 已合并进 Battery（2026-09-14）
 

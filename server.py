@@ -56,6 +56,9 @@ WIFI_EVERY = float(os.environ.get("V30_WIFI_EVERY", "10.0"))
 SERIES_KEYS = [
     "cpu", "temp", "mem", "disk", "rx", "tx", "power", "batt", "batt_cur", "load",
     "io_r", "io_w", "retx",
+    # power = 整机功耗，batt_pow = 电池端功率（两者插电时能差两个数量级，
+    # 详情页把它们画在同一张图上对比）
+    "batt_pow",
 ] + [f"core{i}" for i in range(min(NR_CORES, 8))]
 
 
@@ -990,6 +993,7 @@ class Collector:
             "rx": round(rx_rate / 1024.0, 1),
             "tx": round(tx_rate / 1024.0, 1),
             "power": system_power,          # 曲线画的是**整机**功耗，不是电池端
+            "batt_pow": battery["power"],   # 电池端功率（带符号：正=充入，负=放出）
             "batt": float(battery["capacity"]),
             "batt_cur": battery["current_ma_signed"],
             "load": load["load1"],

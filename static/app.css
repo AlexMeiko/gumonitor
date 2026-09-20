@@ -474,7 +474,11 @@ body { display: flex; justify-content: center; }
   transition: left .08s linear, top .08s linear;
 }
 .chart-tip b { display: block; font-size: 15px; letter-spacing: -.3px; white-space: nowrap; }
+/* 多线图：每根线一个值，字号收一档免得气泡过大 */
+.chart-tip.multi b { font-size: 13px; letter-spacing: -.2px; }
+.chart-tip.multi b + b { margin-top: 1px; }
 .chart-tip span { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.chart-tip.multi span { margin-top: 2px; }
 /* 钉住时气泡上出现「Live」：点它回到实时。
    气泡整体 pointer-events:none，只有这个按钮可点。 */
 .chart-tip .tip-live {

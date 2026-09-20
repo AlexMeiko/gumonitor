@@ -302,7 +302,7 @@ console.log('Edge version =', browser.version(), '\n');
   check('桌面关闭后无残留 / 无横向溢出', g.scrollW <= g.clientW && g.left >= 1440,
         `detail.left=${g.left} scrollW=${g.scrollW}`);
 
-  // 5 分钟统计面板（确认 Power Draw 行不再带符号）
+  // 5 分钟统计面板（整机 / 电池端两行，且都不带正负号）
   await page.click('#btnHistory');
   await page.waitForTimeout(600);
   const rows = await page.evaluate(() =>
@@ -311,11 +311,14 @@ console.log('Edge version =', browser.version(), '\n');
       v: r.querySelector('.v')?.textContent.trim(),
     })));
   await page.screenshot({ path: path.join(OUT, 'pw-stats-sheet.png') });
-  const power = rows.find((r) => r.k === 'Power Draw');
+  const power = rows.find((r) => r.k === 'System Power');
   // 只查正负号（U+2212 减号 / ASCII 加号），范围分隔符是 U+2013 短破折号，不算
   const hasSign = (s) => /[+\u2212]/.test(s) || /(^|\s)-\d/.test(s);
-  check('统计面板有 Power Draw 行且不带正负号',
+  check('统计面板有 System Power 行且不带正负号',
         !!power && !hasSign(power.v), power ? power.v : '(缺)');
+  const battPow = rows.find((r) => r.k === 'Battery Power');
+  check('统计面板有 Battery Power 行且不带正负号',
+        !!battPow && !hasSign(battPow.v), battPow ? battPow.v : '(缺)');
   const cur = rows.find((r) => r.k === 'Battery Current');
   check('统计面板有 Battery Current 行', !!cur, cur ? cur.v : '(缺)');
 
@@ -491,15 +494,75 @@ console.log('Edge version =', browser.version(), '\n');
   // 详情页应该有两张图：功率 + 电流
   const charts = await page.evaluate(() => document.querySelectorAll('#detail .chart-card').length);
   check('Battery 详情页有功率 + 电流两张图', charts === 2, `chart-card=${charts}`);
-  // 整机功耗 ≠ 电池端功率：插着电（尤其 inhibit-charge）时电池端会小到接近 0，
-  // 系统其实在吃 VBUS，必须用 输入 − 充入电池 来算
-  const sysV = parseFloat(findRow(batRows, 'System Power')?.v || '0');
-  const battV = parseFloat(findRow(batRows, 'Battery Power')?.v || '0');
-  check('整机功耗由 VBUS 输入算出，不是电池端那个接近 0 的数',
-        sysV > 0.1 && sysV > battV * 5, `system=${sysV} W vs battery=${battV} W`);
+  // 整机功耗的**不变量**（不要断言某个特定状态 —— 设备插电/充电/放电来回变）：
+  //   整机 = max(0, 输入 − 充入电池) + 电池放出
+  // 三种情形都成立：纯放电（无输入）、插电充电（电池 > 0）、插电但电池不动（电池 ≈ 0）。
+  const numW = (s) => {
+    const m = String(s || '').match(/(-?\d+(?:\.\d+)?)\s*W/);
+    return m ? parseFloat(m[1]) : null;
+  };
+  const sysV = numW(findRow(batRows, 'System Power')?.v);
+  const battV = numW(findRow(batRows, 'Battery Power')?.v);
+  const inV = numW(findRow(batRows, 'Input')?.v) ?? 0;
+  const expect = Math.max(0, inV - Math.max(0, battV ?? 0)) + Math.max(0, -(battV ?? 0));
+  check('整机功耗 = max(0, 输入 − 充入电池) + 电池放出',
+        sysV != null && Math.abs(sysV - expect) < 0.06,
+        `system=${sysV} expected=${expect.toFixed(2)} (input=${inV} battery=${battV})`);
+
+  // 充电时才有：效率 = 充进电池的 / 输入总功率，其余是系统 + 充电回路损耗
+  const eff = findRow(batRows, 'Charging Efficiency');
+  const effPct = eff ? parseFloat(eff.v) : null;
+  check('充电时给出充电效率（0~100%）',
+        !eff || (effPct > 10 && effPct < 100), eff ? eff.v : '(当前未在充电，跳过)');
   check('Battery 详情页标出了功率来源与输入',
         !!findRow(batRows, 'Power Source') && !!findRow(batRows, 'Input'),
         `${findRow(batRows, 'Power Source')?.v} · ${findRow(batRows, 'Input')?.v}`);
+
+  // 功率图是双线：整机 + 电池端
+  const dual = await page.evaluate(() => {
+    const svg = document.querySelector('#detail .chart-card .chart-svg');
+    const strokes = [...svg.querySelectorAll('path[stroke]')].map((p) => p.getAttribute('stroke'));
+    const legend = [...document.querySelectorAll('#detail .chart-axis[style*="flex-start"] span')]
+      .map((e) => e.textContent.trim());
+    return { paths: strokes.length, uniq: [...new Set(strokes)], legend };
+  });
+  check('功率图同时画了整机与电池端两条线',
+        dual.paths === 2 && dual.uniq.length === 2,
+        `${dual.paths} 条 · ${dual.uniq.join(' / ')}`);
+  check('图例区分 System / Battery',
+        dual.legend.join('/') === 'System/Battery', dual.legend.join(' / '));
+  // 图例必须在第二张图**之前**，否则读到图例时已经看不出它指哪张图
+  const order = await page.evaluate(() => {
+    const kids = [...document.querySelector('#detail .detail-body').children];
+    const isLegend = (e) => e.classList.contains('chart-axis') &&
+      (e.getAttribute('style') || '').includes('flex-start');
+    return {
+      legend: kids.findIndex(isLegend),
+      charts: kids.map((e, i) => (e.classList.contains('chart-card') ? i : -1)).filter((i) => i >= 0),
+    };
+  });
+  check('图例紧跟主图（排在第二张图之前）',
+        order.legend > 0 && order.charts.length === 2 && order.legend < order.charts[1],
+        `legend@${order.legend} charts@${order.charts.join(',')}`);
+
+  // 气泡要同时给出两根线的值（hover 触发）
+  const svgBox = await page.locator('#detail .chart-card .chart-svg').first().boundingBox();
+  await page.mouse.move(svgBox.x + svgBox.width * 0.5, svgBox.y + svgBox.height * 0.5);
+  await page.waitForTimeout(250);
+  const tip = await page.evaluate(() => {
+    const t = document.querySelector('#detail .chart-tip');
+    const c = document.querySelector('#detail .chart-card');
+    return {
+      rows: t.querySelectorAll('b').length,
+      texts: [...t.querySelectorAll('b')].map((b) => b.textContent.trim()),
+      tipTop: t.getBoundingClientRect().top,
+      cardTop: c.getBoundingClientRect().top,
+    };
+  });
+  check('气泡同时给出两根线的值', tip.rows === 2, tip.texts.join(' / '));
+  check('气泡没被图表卡顶边裁掉',
+        tip.tipTop >= tip.cardTop - 1,
+        `tip.top=${tip.tipTop.toFixed(0)} card.top=${tip.cardTop.toFixed(0)}`);
   await page.screenshot({ path: path.join(OUT, 'pw-detail-battery.png') });
   await closeTile();
 

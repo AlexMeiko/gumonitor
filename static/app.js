@@ -389,7 +389,8 @@ function drawChart(inst, spec, series, meta) {
   // 提示气泡 + 时间轴
   if (!inst.mini) {
     const primary = lines[0];
-    const val = primary.values[Math.min(cursor, primary.values.length - 1)];
+    const at = (l) => l.values[Math.min(cursor, l.values.length - 1)];
+    const val = at(primary);
     const ts = meta.now - (n - 1 - cursor) * meta.interval;
     if (val != null && w > 0) {
       // 注意：SVG 元素没有 offsetLeft/offsetTop，必须用 getBoundingClientRect 求相对偏移；
@@ -399,17 +400,28 @@ function drawChart(inst, spec, series, meta) {
       const offX = svgBox.left - hostBox.left;
       const offY = svgBox.top - hostBox.top;
       const cardW = hostBox.width || inst.host.clientWidth;
+      // 多线图（功率双线、Traffic 上下行）每根线给一行，颜色和图例对应。
+      // 仍然用 <b> 包每个值，单线时的样式和既有断言都不受影响。
+      const rows = lines.map((l) => {
+        const v = at(l);
+        if (v == null || !Number.isFinite(Number(v))) return '';
+        return `<b class="tip-k" style="color:${COLORS[l.color] || l.color}">${spec.format(v)}</b>`;
+      }).join('');
       inst.tip.style.display = '';
+      inst.tip.classList.toggle('multi', lines.length > 1);
       inst.tip.innerHTML =
-        `<b style="color:${COLORS[primary.color] || primary.color}">${spec.format(val)}</b>` +
+        rows +
         `<span>${clockSec(ts)}</span>` +
         (pinned ? '<button type="button" class="tip-live" title="Back to live">Live</button>' : '');
       inst.tip.classList.toggle('pinned', pinned);
-      // 先量实际宽度，再把气泡夹在卡片内，避免被 overflow:hidden 切掉
+      // 先量实际尺寸，再把气泡夹进卡片内，避免被 overflow:hidden 切掉。
+      // 垂直方向尤其要注意：气泡是 translate(-50%,-100%) 的（向上生长），
+      // 只 clamp 一个固定 40 会让多行气泡的顶部被卡片顶边裁掉。
       const half = inst.tip.offsetWidth / 2 + 3;
+      const tall = inst.tip.offsetHeight + 2;
       const left = Math.max(half, Math.min(cardW - half, offX + cx));
       inst.tip.style.left = `${left}px`;
-      inst.tip.style.top = `${offY + Math.max(40, y(val) - 10)}px`;
+      inst.tip.style.top = `${offY + Math.max(tall, y(val) - 10)}px`;
     }
     if (inst.axis) {
       const spans = inst.axis.querySelectorAll('span');
@@ -686,11 +698,17 @@ const METRICS = {
             : d.battery.capacity <= 20 ? 'critical'
             : d.battery.capacity <= 40 ? 'elevated' : 'normal',
         },
-        // 主图 = **整机**功耗：放电时是电池输出，插电时是 VBUS 输入减去充进电池的部分。
-        // 注意它**不是** SoC/Core 功耗（v30 没有 rail 级传感器），
-        // 且充电时这个差值里还含充电回路的损耗，会比纯系统功耗略高。
+        // 主图两条线：整机（power）与电池端（batt_pow）。
+        // 放电时电池就是整机的唯一来源，两条线**本来就应该重合**；
+        // 插电时系统吃 VBUS，两条线会分开（inhibit-charge 下能差两个数量级）——
+        // 这正是"为什么插着电电池端几乎不动"最直观的呈现。
+        // 注意整机**不是** SoC/Core 功耗（v30 没有 rail 级传感器），
+        // 且充电时"输入 − 充入电池"这个差值里含充电回路损耗，会比纯系统功耗略高。
         chart: {
-          lines: [{ key: 'power', color: 'yellow', abs: true }],
+          lines: [
+            { key: 'power', color: 'yellow', abs: true },
+            { key: 'batt_pow', color: 'green', abs: true },
+          ],
           tight: true,
           minSpan: 1,
           format: (x) => `${x.toFixed(2)} W`,
@@ -704,8 +722,13 @@ const METRICS = {
           format: (x) => `${x.toFixed(0)} mA`,
         },
         stats: false,
+        legend: [
+          { color: 'yellow', text: 'System' },
+          { color: 'green', text: 'Battery' },
+        ],
         averages: (series) => [
-          ['Avg Power (5 min)', `${avgMag(series.power).toFixed(2)} W`],
+          ['Avg System Power (5 min)', `${avgMag(series.power).toFixed(2)} W`],
+          ['Avg Battery Power (5 min)', `${avgMag(series.batt_pow).toFixed(2)} W`],
           ['Avg Current (5 min)', `${avgMag(series.batt_cur).toFixed(0)} mA`],
         ],
         info: () => [
@@ -1016,17 +1039,7 @@ function openDetail(id) {
   chartCard.style.background = chartBg(spec.color);
   body.appendChild(chartCard);
 
-  // 第二张图（可选）：比如 Battery 页的电流。mA 和 W 差两个数量级，
-  // 不能和功率挤在一张图里，所以单独一张矮图。
-  if (spec.miniChart) {
-    body.appendChild(h('div', 'sub-title', spec.miniChart.title));
-    const extraCard = h('div', 'chart-card');
-    extraCard.style.background = chartBg(spec.miniChart.lines[0].color);
-    body.appendChild(extraCard);
-    chartCards.extra = createChart(extraCard, { height: 96 });
-  }
-
-  // 图例（流量双线）
+  // 图例要紧跟主图 —— 放在第二张图后面会被隔开，读到图例时已经不知道它指哪张图了
   if (spec.legend) {
     const lg = h('div', 'chart-axis');
     lg.style.justifyContent = 'flex-start';
@@ -1036,6 +1049,16 @@ function openDetail(id) {
         <i style="width:8px;height:8px;border-radius:9px;background:${COLORS[l.color]};display:inline-block"></i>${l.text}</span>`
     ).join('');
     body.appendChild(lg);
+  }
+
+  // 第二张图（可选）：比如 Battery 页的电流。mA 和 W 差两个数量级，
+  // 不能和功率挤在一张图里，所以单独一张矮图，排在图例之后。
+  if (spec.miniChart) {
+    body.appendChild(h('div', 'sub-title', spec.miniChart.title));
+    const extraCard = h('div', 'chart-card');
+    extraCard.style.background = chartBg(spec.miniChart.lines[0].color);
+    body.appendChild(extraCard);
+    chartCards.extra = createChart(extraCard, { height: 96 });
   }
 
   const infoCard = h('div', 'info-card');
@@ -1292,8 +1315,10 @@ function openHistory() {
       ['Disk', 'disk', (x) => `${x.toFixed(1)}%`],
       ['Download', 'rx', (x) => fmtKBps(x)],
       ['Upload', 'tx', (x) => fmtKBps(x)],
-      // 电池端 V × I（整机功耗）；**不是** SoC/Core 功耗
-      ['Power Draw', 'power', (x) => `${x.toFixed(2)} W`, true],
+      // 整机功耗（插电时 = 输入 − 充入电池，放电时 = 电池输出）；**不是** SoC/Core 功耗
+      ['System Power', 'power', (x) => `${x.toFixed(2)} W`, true],
+      // 电池端 V × I：放电时和整机基本相等，插电时可能小到接近 0
+      ['Battery Power', 'batt_pow', (x) => `${x.toFixed(2)} W`, true],
       // 5 分钟电量最高/平均没有参考价值，改成充放电电流的量级
       ['Battery Current', 'batt_cur', (x) => `${x.toFixed(0)} mA`, true],
       ['Load 1m', 'load', (x) => x.toFixed(2)],
