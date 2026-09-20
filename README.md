@@ -3,27 +3,44 @@
 把一台 2017 年的旧手机（LG V30 / `joan`，postmarketOS edge，aarch64）变成常驻遥测节点。
 UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页。
 
-**打开地址： `http://<设备IP>/monitor/`**
-
 两个特点：服务端是**纯 Python 标准库**（零第三方依赖，设备上装包很麻烦），
 前端是**零依赖原生 JS + 手写 SVG**。传感器侧能拿到的比多数桌面工具还细 ——
 `pmi8998-fg` 的 fuel-gauge、`pmi8998-rradc` 的外壳/充电芯片温度、
 `usbin` 输入侧功率、zram 压缩比、UFS 的 I/O 繁忙度。
 
-![首页](.workbuddy/shots/live-home.png)
+> **适用范围**：读的全是 `/proc`、`/sys` 这类标准接口，所以框架本身在任何 Linux 上都能跑；
+> 只是**具体采集项是按这台机器挑了传感器**的（Qualcomm PMIC、UFS、zram…）。
+> 换台设备大概率要改 `server.py` 里的采集函数 —— 改起来不复杂，每个函数都只读几个文件。
+
+![首页](docs/screenshot.png)
 
 ## 它是什么
 
-一个跑在 v30 本机的只读遥测服务：
+一个只读遥测服务：每秒从 `/proc`、`/sys` 采样一次，写进 300 点环形历史，
+再用一个极简 HTTP 服务把「当前快照 + 各序列历史」发给前端。
 
 ```
-浏览器 ──► nginx :80 (/monitor/) ──► 127.0.0.1:8090 (server.py) ──► /proc /sys
+/proc /sys ──► server.py ──► HTTP :8090 ──► 浏览器
+              （每秒采样）    （前端每秒拉 /api/state）
 ```
 
-* `server.py` — 纯 Python 标准库（设备上只有 python3 + apk，装第三方包很麻烦）。
-  采集线程每 1 秒采一次样写进环形历史（300 点 = 5 分钟），HTTP 线程只读快照，互不阻塞。
-* `static/` — 前端三个文件（index.html / app.css / app.js），零依赖原生 JS，
-  图表是手写 SVG（含阈值虚线、竖直游标、数值气泡、逐核迷你图）。
+服务本身**只管监听一个端口**，对进程管理器、防火墙都没有要求。
+怎么让外面访问到它跟项目无关：直接开端口也行，挂到已有的 80/443 反代子路径下也行
+（本项目开发时用的是后者）。两种写法见下面「部署」。
+
+## 仓库结构
+
+| 路径 | 是什么 |
+| --- | --- |
+| `server.py` | 采集 + HTTP 服务。纯 Python 标准库，零第三方依赖 |
+| `static/` | 前端三件套（index.html / app.css / app.js）。零依赖原生 JS，图表是手写 SVG |
+| `examples/` | 部署参考模板：systemd 用户服务、nginx 子路径反代、幂等安装脚本 |
+| `tests/` | Playwright 端到端回归（41 项断言）+ 一份脱敏的真机样例快照 |
+
+> 前端**所有资源和接口都用相对路径**（`app.css` / `app.js` / `api/state`），
+> 所以不管挂在 `/monitor/` 这种子路径下、还是直连 `:8090/`，都不用改代码。
+
+## 前端实现要点
 
 ### 图表选点（钉住）
 
@@ -45,51 +62,6 @@ UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页�
 `fresh`。**渲染只准用 fresh**，`currentDetail.spec` 是打开页面那一刻的快照 ——
 用它渲染会出现"小图在动、百分比数字永不动"（逐核占用率曾经就是这样）。
 同理：卡片上只存**索引**（`data-core`），别把带数值的对象缓存到 DOM 节点上。
-* `systemd/gumonitor.service` — systemd **用户**服务（linger 已开，重启后自动起）。
-* `nginx/gumonitor.location.conf` — 反代片段。**必须**，原因见下。
-
-## 为什么必须走 nginx
-
-v30 的 nftables `input` 链 `policy drop`，只逐个放行了 22 / 80 / 8080 / 63910 等端口：
-
-```
-tcp dport 80 accept comment "nginx"
-tcp dport 8080 accept comment "qbittorrent webui"
-tcp dport 22 accept comment "accept SSH"
-```
-
-8090 不在白名单里，从局域网直接连不上（本机实测：80 通、8090 超时）。
-两种做法都行，这里选了不加防火墙规则的那种：
-
-```sh
-cd /path/to/v30-dashboard
-bash deploy.sh          # 部署服务 + 幂等写入 nginx 反代 + 自检
-```
-
-`nginx/install-nginx.sh` 会把下面的 location 插进 `/etc/nginx/http.d/default.conf`
-的默认 server 块（已存在则跳过，`nginx -t` 失败自动回滚）：
-
-```nginx
-location = /monitor { return 301 /monitor/; }
-location /monitor/ {
-    proxy_pass http://127.0.0.1:8090/;   # 结尾斜杠 = 剥掉 /monitor/ 前缀
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_read_timeout 60s;
-    proxy_buffering off;
-}
-```
-
-> 因为 `proxy_pass` 会剥前缀，前端**所有资源与接口都必须用相对路径**
-> （`app.css` / `app.js` / `api/state`），这样 `/monitor/` 与直连 `:8090/` 都能用。
-
-如果你想直连 8090，就自己加一条防火墙规则（不推荐，反代已经够用）：
-
-```sh
-sudo nft add rule inet filter input tcp dport 8090 accept
-sudo sh -c 'nft list ruleset > /etc/nftables.conf'   # 持久化
-```
-
 ## 采集了哪些数据
 
 | 卡片 | 数据来源 | 详情页 |
@@ -205,7 +177,8 @@ v30 上**没有 SoC / Core / rail 级功率传感器**：
 的 min 是 min-content —— 灰字放不下时会**把网格轨道撑宽**，整块横向溢出，
 再被 `#app { overflow-x: clip }` 裁掉，右列内容就直接看不见了
 （不是出现滚动条，所以很容易漏掉）。
-排查脚本：`.workbuddy/pw/probe-tiles.mjs`（列出每块磁贴灰字宽度 vs 预算 + 网格是否溢出）。
+排查脚本：`tests/probe-tiles.mjs`（列出每块磁贴灰字宽度 vs 预算 + 网格是否溢出），
+改灰字文案前先跑 `tests/probe-badge.mjs` 量一下放不放得下。
 
 ### 磁贴渲染要有逐块兜底
 
@@ -275,7 +248,7 @@ python3 server.py                      # 默认监听 0.0.0.0:8090
    iptables -A INPUT -p tcp --dport 8090 -j ACCEPT              # iptables
    ufw    allow 8090/tcp                                        # ufw
    ```
-2. **走已有的 80/443 反代**（推荐，不用碰防火墙规则）。这个项目的 UI 就是为**子路径**设计的：
+2. **挂到已有的 80/443 反代子路径下**（不用碰防火墙规则；本项目开发时用的就是这个）。
    `examples/nginx-subpath.conf` 里有两个 location 块，配 `examples/install-nginx-snippet.sh`
    可以幂等地插进 nginx 配置（先 `nginx -t`，失败自动回滚）。Caddy / Traefik 同理。
 
@@ -288,6 +261,9 @@ python3 server.py                      # 默认监听 0.0.0.0:8090
 > 上面这套 `examples/` + 上面的两段说明，等价于它做的事。
 
 ## 环境备忘（踩过的坑）
+
+下面有若干条是**本项目的开发机或那台旧手机**的具体情况（写了"本机""设备"的即是），
+不是通用结论；但踩坑本身的结论大多可以照搬。
 
 * 本机无 `/dev/ptmx`，`sshpass` 用不了：一律 `SSH_ASKPASS + SSH_ASKPASS_REQUIRE=force + setsid`。
   另外本机 `/etc/ssh/ssh_config.d/*` 权限异常，ssh 要加 `-F /dev/null`。
@@ -315,8 +291,8 @@ python3 server.py                      # 默认监听 0.0.0.0:8090
 * 无头 Edge 截图的视口不跟 `--window-size` 等值走：宽恒为 `max(宽, 492)`、高 = `高 − 131`
   （只有裸 `--screenshot` 那条链路如此；Playwright 的 `viewport` 是精确的）。
   CDP 的页级命令在本机 Edge 上不响应。
-* 仍可用的土办法：`.workbuddy/shot2.sh`（+`trim.py` 裁白边）截图、
-  `.workbuddy/run-diag.sh <脚本名>` 注入脚本 + `--dump-dom` 取结果。
+* 另外两个土办法脚本没进仓库（本机私有）：`.workbuddy/shot2.sh`（截图，配 `trim.py` 裁白边）、
+  `.workbuddy/run-diag.sh <脚本名>`（注入脚本 + `--dump-dom` 取结果）。它们踩过的坑值得留着：
   * `--virtual-time-budget` 快进 `setTimeout` 但**不推进 CSS transition** → 读
     `getComputedStyle` 拿到的是过渡**起始值**，会把"已关闭"读成"停在打开态"。
     要断言状态就上 Playwright，或先注入 `*{transition:none!important}`。
