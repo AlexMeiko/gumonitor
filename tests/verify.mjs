@@ -276,31 +276,66 @@ console.log('Edge version =', browser.version(), '\n');
   await page.waitForFunction(() => document.querySelectorAll('.tile').length > 0, { timeout: 8000 });
   await page.waitForTimeout(600);
 
-  await page.mouse.move(720, 500);
+  // ---- 宽屏是「双栏常驻」：整页不滚，左栏自己滚；详情不再弹层 ----
+  const layout = await page.evaluate(() => {
+    const home = document.getElementById('home');
+    const h = home.getBoundingClientRect();
+    const d = document.getElementById('detail');
+    const dr = d.getBoundingClientRect();
+    return {
+      home: { l: Math.round(h.left), r: Math.round(h.right) },
+      detail: { l: Math.round(dr.left), r: Math.round(dr.right) },
+      detailPos: getComputedStyle(d).position,
+      bodyOverflow: getComputedStyle(document.body).overflow,
+      title: document.querySelector('#detail .detail-bar h2')?.textContent || '',
+      closeVisible: !!document.querySelector('#detail #dClose')?.offsetParent,
+      scrollW: document.documentElement.scrollWidth,
+      clientW: document.documentElement.clientWidth,
+      pageScrollable: document.documentElement.scrollHeight > document.documentElement.clientHeight + 4,
+    };
+  });
+  check('桌面：详情降级为常驻栏位（不是 fixed 模态层）',
+        layout.detailPos === 'static', `position=${layout.detailPos}`);
+  check('桌面：左右两栏并排、不重叠',
+        layout.home.r <= layout.detail.l + 1 && layout.detail.r >= 1400,
+        `首页 0~${layout.home.r} / 详情 ${layout.detail.l}~${layout.detail.r}`);
+  check('桌面：打开页面就默认选中第一个指标',
+        layout.title === 'CPU Load', `右栏标题="${layout.title}"`);
+  check('桌面：隐藏关闭按钮（不是模态，无需"关"）',
+        !layout.closeVisible, `closeVisible=${layout.closeVisible}`);
+  check('桌面：整页不滚（改成两栏各自滚）',
+        !layout.pageScrollable && layout.bodyOverflow === 'hidden',
+        `pageScrollable=${layout.pageScrollable} body.overflow=${layout.bodyOverflow}`);
+  check('桌面：无横向溢出', layout.scrollW <= layout.clientW,
+        `${layout.scrollW} <= ${layout.clientW}`);
+
+  // 左栏可以独立滚动
+  await page.mouse.move(200, 500);
   await page.mouse.wheel(0, 400);
   await page.waitForTimeout(400);
-  const y = await page.evaluate(() => window.scrollY);
-  check('桌面 1440x900 滚轮能滚动', y > 0, `scrollY=${y}`);
+  const leftScroll = await page.evaluate(() => document.getElementById('home').scrollTop);
+  check('桌面：左栏能独立滚动', leftScroll > 0, `#home.scrollTop=${leftScroll}`);
 
   const sb = await page.evaluate(() => ({ i: window.innerWidth, c: document.documentElement.clientWidth }));
   check('桌面视口滚动条已隐藏', sb.i - sb.c === 0, `innerWidth-clientWidth=${sb.i - sb.c}`);
 
-  // 桌面下开合详情页，确认没有残留竖条（原始 bug）
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(300);
-  await page.click('.tile');
-  await page.waitForTimeout(700);
+  // 点另一个磁贴：右栏应该是**替换**内容，不是叠加
   await page.screenshot({ path: path.join(OUT, 'pw-desktop-detail.png') });
-  await page.click('#dClose');
-  await page.waitForTimeout(900);
-  await page.screenshot({ path: path.join(OUT, 'pw-desktop-after-close.png') });
-  const g = await page.evaluate(() => {
-    const d = document.getElementById('detail').getBoundingClientRect();
-    return { left: Math.round(d.left), scrollW: document.documentElement.scrollWidth,
-             clientW: document.documentElement.clientWidth };
-  });
-  check('桌面关闭后无残留 / 无横向溢出', g.scrollW <= g.clientW && g.left >= 1440,
-        `detail.left=${g.left} scrollW=${g.scrollW}`);
+  await page.locator('.tile').nth(7).click();         // 7 = Battery
+  await page.waitForTimeout(700);
+  const swapped = await page.evaluate(() => ({
+    title: document.querySelector('#detail .detail-bar h2')?.textContent || '',
+    detailNodes: document.querySelectorAll('#detail').length,
+    charts: document.querySelectorAll('#detail .chart-card .chart-svg').length,
+    homePushed: document.getElementById('home').classList.contains('pushed'),
+  }));
+  check('桌面：点另一个磁贴，右栏内容被替换',
+        swapped.title === 'Battery' && swapped.detailNodes === 1,
+        `标题="${swapped.title}" detail 节点数=${swapped.detailNodes}`);
+  check('桌面：右栏同时渲染多张图（Battery 的功率 + 电流）',
+        swapped.charts === 2, `chart-svg=${swapped.charts}`);
+  check('桌面：首页不再被"推开"', !swapped.homePushed, `pushed=${swapped.homePushed}`);
+  await page.screenshot({ path: path.join(OUT, 'pw-desktop-swapped.png') });
 
   // 5 分钟统计面板（整机 / 电池端两行，且都不带正负号）
   await page.click('#btnHistory');

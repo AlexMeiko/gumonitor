@@ -654,3 +654,106 @@ body { display: flex; justify-content: center; }
   transition: transform .3s ease;
 }
 .offline.show { transform: translate(-50%, 0); }
+
+/* =========================================================================
+   宽屏（电脑端）布局：≥1024px —— 双栏常驻
+
+   手机上是「点磁贴 → 全屏滑入详情」；宽屏上改成：
+     左栏 = 设备卡 + 磁贴（自己滚）        右栏 = 选中指标的详情（自己滚）
+
+   实现上刻意**不动 DOM**：#home 与 #detail 本来就是 #app 的直接子节点，
+   宽屏下把 #app 变成两列 grid，两者各占一列 ——
+   openDetail / updateDetail 的渲染逻辑一行都不用改。
+   （#offline / .sheet-mask / .sheet 都是 position: fixed，不参与 grid。）
+   ========================================================================= */
+@media (min-width: 1024px) {
+  html, body { height: 100%; }
+
+  /* 桌面下整页不滚，两栏各自滚。这里 overflow: hidden 是安全的：
+     不再需要"靠 body 滚"，所以踩不到「body 变滚动容器 +
+     overscroll-behavior-y: none 阻断滚动链」那个坑（见文件开头那段注释）。 */
+  body {
+    display: block;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #app {
+    max-width: none;
+    width: 100%;
+    height: 100vh;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(352px, 408px) minmax(0, 1fr);
+    box-shadow: none;
+  }
+
+  /* ---------------- 左栏：首页 ---------------- */
+  #home {
+    height: 100vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-top: 22px;
+    padding-bottom: 28px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    /* 桌面端没有"被详情页推开"这回事。!important 是为了兜住
+       从窄屏 resize 过来时残留的 .pushed 类。 */
+    transform: none !important;
+    opacity: 1 !important;
+  }
+  #home::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  .view { min-height: 0; }
+  /* 磁贴仍然是 2 列：左栏只有 ~400px，再窄就放不下右上角的灰字了
+     （灰字宽度预算的推导见「卡片文案原则」那节） */
+  #home .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* ---------------- 右栏：详情 ---------------- */
+  /* 从全屏模态层降级成普通栏位：不固定定位、不滑入、不盖任何东西。
+     ⚠️ 必须连 `.detail.open` 一起覆盖 —— 基础样式里 `.detail.open`
+     （两个类）的特异性高于单个 `.detail`，只写 .detail 的话
+     滑入态那个 translateX(-50%) 会留下来，把右栏整体左移半屏。 */
+  .detail,
+  .detail.open {
+    position: static;
+    inset: auto;
+    transform: none;
+    width: auto;
+    max-width: none;
+    height: 100vh;
+    z-index: auto;
+    background: var(--card);
+    border-left: 1px solid var(--sep);
+  }
+  .detail-bar { padding-left: 24px; padding-right: 24px; }
+  /* 超宽屏上别把信息行拉成一条长线，给个宽度上限并居中 */
+  .detail-body {
+    padding: 6px 24px 0;
+    max-width: 1240px;
+    margin: 0 auto 0;
+  }
+  /* 不是模态层，就没有"关闭"的语义 —— 想看别的指标直接点左栏 */
+  .detail-bar #dClose { display: none; }
+
+  /* 详情内部利用横向空间：信息卡两列、核心 / 温区网格四列 */
+  .detail .info-card {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 28px;
+  }
+  .detail .info-card .row { margin-bottom: 16px; }
+  .detail .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+  /* 空态：还没选中任何指标 */
+  .detail-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--muted);
+    font-size: 16px;
+  }
+
+  /* 底部面板在宽屏上别那么窄 */
+  .sheet { max-width: 560px; }
+}

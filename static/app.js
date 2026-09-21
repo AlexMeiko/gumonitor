@@ -907,6 +907,19 @@ const METRICS = {
 // power 已于 2026-09-14 合并进 battery（同一份数据源、详情页字段重复）
 const TILE_ORDER = ['cpu', 'temp', 'memory', 'disk', 'io', 'traffic', 'netq', 'battery', 'system'];
 
+/* -------------------------------------------------------- 布局模式（断点） */
+/* 手机（<1024px）：单栏，点磁贴 → 全屏滑入的详情层，是「模态」。
+   电脑（≥1024px）：双栏常驻，左栏磁贴、右栏直接渲染详情，不是模态。
+   两者的差别只在「一个 CSS 断点 + 几处行为分支」，渲染逻辑（openDetail /
+   updateDetail / drawChart）完全共用 —— 所以手机端的表现一行都不会变。 */
+const DESKTOP_MQ = window.matchMedia('(min-width: 1024px)');
+const isDesktop = () => DESKTOP_MQ.matches;
+
+/* 宽屏下图表画大一点：竖向不再紧张，横向也够 */
+function chartHeights() {
+  return isDesktop() ? { main: 260, mini: 144 } : { main: 168, mini: 96 };
+}
+
 /* ------------------------------------------------------------------ 状态 */
 let DATA = null;
 let failures = 0;
@@ -1043,12 +1056,13 @@ function openDetail(id) {
 
   // 第二张图（可选）：比如 Battery 页的电流。mA 和 W 差两个数量级，
   // 不能和功率挤在一张图里，所以单独一张矮图。
+  const sizes = chartHeights();
   if (spec.miniChart) {
     body.appendChild(h('div', 'sub-title', spec.miniChart.title));
     const extraCard = h('div', 'chart-card');
     extraCard.style.background = chartBg(spec.miniChart.lines[0].color);
     body.appendChild(extraCard);
-    chartCards.extra = createChart(extraCard, { height: 96 });
+    chartCards.extra = createChart(extraCard, { height: sizes.mini });
   }
 
   const infoCard = h('div', 'info-card');
@@ -1099,7 +1113,7 @@ function openDetail(id) {
   }
 
   view.appendChild(body);
-  chartCards.main = createChart(chartCard, { height: 168 });
+  chartCards.main = createChart(chartCard, { height: sizes.main });
 
   // 图例压在主图右上角。**必须放在 createChart 之后** —— 那个函数会
   // host.innerHTML = ''，先加的会被抹掉。
@@ -1117,6 +1131,13 @@ function openDetail(id) {
   updateDetail();
 
   view.setAttribute('aria-hidden', 'false');
+  if (isDesktop()) {
+    // 宽屏是**常驻栏位**：直接显示，不推开首页，也不往 history 里塞条目
+    // （否则每点一个磁贴就多一条历史，返回键会变成"逐个撤销选择"）
+    view.classList.add('open');
+    $('#home').classList.remove('pushed');
+    return;
+  }
   if (!history.state || !history.state.detail) history.pushState({ detail: id }, '');
   requestAnimationFrame(() => {
     view.classList.add('open');
@@ -1128,10 +1149,17 @@ function closeDetail(fromPop) {
   const view = $('#detail');
   view.classList.remove('open');
   $('#home').classList.remove('pushed');
-  view.setAttribute('aria-hidden', 'true');
   currentDetail = null;
   chartCards.main = null;
   Object.keys(chartCards).forEach((k) => { if (k !== 'main') delete chartCards[k]; });
+
+  if (isDesktop()) {
+    // 宽屏下右栏是常驻的，"关闭"只是取消选中 —— 留个空态，不是收起一个弹层
+    view.innerHTML = '<div class="detail-empty">Select a metric on the left</div>';
+    view.setAttribute('aria-hidden', 'false');
+    return;
+  }
+  view.setAttribute('aria-hidden', 'true');
   if (!fromPop && history.state && history.state.detail) history.back();
 }
 
@@ -1392,16 +1420,26 @@ function boot() {
   history.replaceState({ v: 'home' }, '');
   window.addEventListener('popstate', () => { if (currentDetail) closeDetail(true); });
 
+  // 跨越 1024px 断点时布局变了（单栏模态 ↔ 双栏常驻），图表高度也跟着变
+  // （168 ↔ 260），所以必须按当前指标重建一次图表。
+  DESKTOP_MQ.addEventListener('change', (e) => {
+    const id = currentDetail ? currentDetail.id : (e.matches ? TILE_ORDER[0] : null);
+    if (id) openDetail(id);
+    else $('#detail').innerHTML = '';
+  });
+
   poll();
 
   // 支持 #cpu / #temp / #system 这类深链，直接打开对应详情页。
   // power 已合并进 battery，旧链接做个转发免得失效。
+  // 宽屏下若没有深链，默认选中第一个指标 —— 否则右边一大片空白。
   const LEGACY_DEEP = { power: 'battery' };
   const raw = (location.hash || '').replace('#', '');
   const deep = LEGACY_DEEP[raw] || raw;
-  if (deep && METRICS[deep]) {
+  const wanted = deep && METRICS[deep] ? deep : (isDesktop() ? TILE_ORDER[0] : null);
+  if (wanted) {
     const wait = setInterval(() => {
-      if (DATA) { clearInterval(wait); openDetail(deep); }
+      if (DATA) { clearInterval(wait); openDetail(wanted); }
     }, 120);
   }
 }
