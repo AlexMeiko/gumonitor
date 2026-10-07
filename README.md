@@ -99,6 +99,7 @@ UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页�
 | 卡片 | 数据来源 | 详情页 |
 | --- | --- | --- |
 | CPU Load | `/proc/stat` 每秒差值，逐核 + 总 | 总负载折线（阈值 80/95）+ 8 个核心卡（各自迷你折线）|
+| GPU | `devfreq/5000000.gpu` + `/proc/interrupts` 的 `gpu-irq` | **上电时间占比折线** + 频率副图 + 档位/governor/中断（见下）|
 | Temperature | `thermal_zone0` = `pm8998-thermal` | 折线（应用阈值 65/80）+ 分区温度 + 内核 trip point（105/125 被动/临界）|
 | Memory | `/proc/meminfo` | 占用率折线 + Total/Used/Cached/Buffers/Swap + PSI |
 | Disk Usage | `statvfs('/' '/boot' '/data')` | 占用率折线 + 各挂载点用量 |
@@ -110,6 +111,36 @@ UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页�
 
 此外 Memory 详情页带 **Zram**（压缩比/节省量/交换速率），Temperature 详情页带
 **IIO rradc** 的 skin / chg 温度点（`thermal_zone` 里只有 SoC 和电池两个）。
+
+### GPU：只有"上电时间占比"，没有占用率
+
+![GPU 详情页](docs/screenshot-gpu.png)
+
+
+这台设备的 GPU 是 msm/freedreno（Adreno 530），**内核没有导出任何占用率**：
+
+* drm 设备下没有 `gpu_busy_percent`（那是 drm/sched 给部分驱动才建的节点）；
+* devfreq 只有频率与档位，没有 `busy_time` / `total_time`；
+* debugfs 里 `/sys/kernel/debug/dri/0/*` 是 root-only，且没有 load 计数；
+* `trans_stat` 只在**发生变频时**才结算上一段，长时间停在一档就不前进 ——
+  只能当"自开机累计驻留"看，拿两次差值当窗口分布是错的。
+
+能用的只有 **runtime PM 的上电时间占比**：
+
+```
+active% = Δruntime_active_time / (Δruntime_active_time + Δruntime_suspended_time)
+```
+
+这两个累计毫秒数是**实时前进**的（实测每秒 +1000），所以每秒采样能算出窗口内的占比。
+GPU 空闲时会自动 runtime suspend，因此这个数低就说明确实没活；但"上电了还没派满"
+的那段时间也会算进来，所以它会**略高于**真占用率。
+
+因此界面上这个数一律叫 **Active**，详情页还有一行 `Measured As: Powered-on time
+(no SM counter)` —— 不要把它当成 SM 利用率展示。想拿真占用率需要在设备侧跑
+GL/EGL 采样（比如 `kmscube` + 读 GPU 计数器）或者给内核打补丁，都不在本项目的范围内。
+
+采集项还包括当前/最高频率（7 档：257–710 MHz）、`simple_ondemand` governor、
+`gpu-irq` 中断计数与速率。**没有 GPU 的设备整块隐藏**，不会留一块永远显示 `—` 的磁贴。
 
 ### 存储 I/O 只统计 `sda`
 
@@ -261,7 +292,8 @@ v30 上**没有 SoC / Core / rail 级功率传感器**：
 * `GET /` — 看板页面
 * `GET /api/state` — 一份完整快照 + 各序列的 5 分钟历史（前端每秒拉一次）
 * `GET /api/health` — `{"ok":true}`
-* 前端支持深链：`#cpu`、`#temp`、`#memory`、`#disk`、`#io`、`#traffic`、`#netq`、`#battery`、`#system`
+* 前端支持深链：`#cpu`、`#gpu`、`#temp`、`#memory`、`#disk`、`#io`、`#traffic`、`#netq`、`#battery`、`#system`
+  （`#power` 会转发到 `#battery`；设备上不存在的指标不会打开空页面）
 
 ## 部署
 

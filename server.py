@@ -59,6 +59,8 @@ SERIES_KEYS = [
     # power = 整机功耗，batt_pow = 电池端功率（两者插电时能差两个数量级，
     # 详情页把它们画在同一张图上对比）
     "batt_pow",
+    # gpu_act = GPU 上电时间占比（不是 SM 占用率），gpu_freq = 当前频率 MHz
+    "gpu_act", "gpu_freq",
 ] + [f"core{i}" for i in range(min(NR_CORES, 8))]
 
 
@@ -604,6 +606,108 @@ def sample_iio_temps() -> list[dict]:
     return out
 
 
+def find_gpu_devfreq() -> str | None:
+    """返回 GPU 的 devfreq 目录（如 /sys/class/devfreq/5000000.gpu），没有就 None。"""
+    try:
+        for name in sorted(os.listdir("/sys/class/devfreq")):
+            path = f"/sys/class/devfreq/{name}"
+            # 名字带 gpu 的（msm 是 5000000.gpu）；别的平台也可能叫 gpu / gpufreq
+            if "gpu" in name.lower() or "gpu" in (read_text(f"{path}/name") or "").lower():
+                return path
+    except OSError:
+        pass
+    return None
+
+
+def sample_gpu(prev: dict | None) -> dict:
+    """GPU：频率档位 + runtime PM 上电时间占比。
+
+    注意这台机器上**没有真正的 SM 占用率**：drm 设备没导出 gpu_busy_percent，
+    devfreq 也没暴露 busy_time/total_time，debugfs 里的那些是 root-only。
+    能拿到的是一个定义清晰、内核自己在算的量 ——
+    **runtime PM 的 active 时间占比**（GPU 上电/未挂起的时间占多少）。
+    GPU 空闲时会自动 runtime suspend，所以这个数低就说明确实没什么活，
+    但它会把"上电但还没派满"的那段时间也算成忙，因此会略高于真占用率。
+    界面上按"Active"呈现，不要写成 Utilization，免得被当成 SM 占用率。
+    """
+    base = find_gpu_devfreq()
+    if not base:
+        return {"present": False}
+
+    cur = read_int(f"{base}/cur_freq", 0)
+    out = {
+        "present": True,
+        "dev": os.path.basename(base),
+        "freq_mhz": round(cur / 1e6, 1),
+        "target_mhz": round(read_int(f"{base}/target_freq", cur) / 1e6, 1),
+        "min_mhz": round(read_int(f"{base}/min_freq", 0) / 1e6, 1),
+        "max_mhz": round(read_int(f"{base}/max_freq", 0) / 1e6, 1),
+        "governor": read_text(f"{base}/governor") or "-",
+        "polling_ms": read_int(f"{base}/polling_interval", 0),
+        "steps": [],
+        "residency": [],
+        "state": "-",
+        "active_pct": 0.0,
+        "irq": sample_gpu_irq(),
+        "irq_rate": 0.0,
+    }
+    raw_steps = (read_text(f"{base}/available_frequencies") or "").split()
+    out["steps"] = [round(int(v) / 1e6, 1) for v in raw_steps if v.isdigit()]
+
+    # 各频率档的累计驻留时间。devfreq 只在**发生变频时**结算上一段，
+    # 所以长时间停在某一档时这个值不会前进 —— 只能当"自开机累计"看，
+    # 不能拿两次差值当窗口内的分布。
+    for line in (read_text(f"{base}/trans_stat") or "").splitlines():
+        parts = line.split(":")
+        if len(parts) != 2:
+            continue
+        nums = parts[1].split()
+        if len(nums) < 2:
+            continue
+        try:
+            mhz = round(int(parts[0].strip(" *")) / 1e6, 1)
+            ms = int(nums[-1])
+        except ValueError:
+            continue
+        if ms > 0:
+            out["residency"].append({"mhz": mhz, "ms": ms})
+    out["residency"].sort(key=lambda r: -r["ms"])
+
+    # runtime PM：active/suspended 的累计毫秒数是**实时前进**的（实测每秒 +1000），
+    # 所以两次采样的差值就是这一段时间里 GPU 上电了多久。
+    pm = "/sys/class/drm/card0/device/power"
+    out["state"] = read_text(f"{pm}/runtime_status") or "-"
+    act = read_int(f"{pm}/runtime_active_time", 0)
+    sus = read_int(f"{pm}/runtime_suspended_time", 0)
+    if prev and prev.get("present"):
+        d_act = max(0, act - prev["_act"])
+        d_sus = max(0, sus - prev["_sus"])
+        total = d_act + d_sus
+        if total > 0:
+            out["active_pct"] = round(d_act / total * 100.0, 1)
+        # 中断是"作业完成"触发的，计数速率能给一个活动强度的旁证
+        d_irq = max(0, out["irq"] - prev["irq"])
+        out["irq_rate"] = round(d_irq / (total / 1000.0), 1) if total >= 1000 else 0.0
+    out["_act"] = act
+    out["_sus"] = sus
+    return out
+
+
+def sample_gpu_irq() -> int:
+    """/proc/interrupts 里 gpu-irq 那一行的累计中断数（所有 CPU 之和）。"""
+    try:
+        with open("/proc/interrupts", "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if "gpu-irq" not in line:
+                    continue
+                cols = line.split()
+                # 第 0 列是 IRQ 号，最后 3 列是中断芯片/类型/名字，中间是各 CPU
+                return sum(int(c) for c in cols[1:-3] if c.isdigit())
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
 def sample_loadavg() -> dict:
     raw = (read_text("/proc/loadavg", "") or "").split()
     running = raw[3].split("/") if len(raw) > 3 else ["0", "0"]
@@ -748,6 +852,7 @@ class Collector:
         self._prev_swap: tuple[int, int] | None = None
         self._wifi: dict | None = None
         self._wifi_ts = 0.0
+        self._prev_gpu: dict | None = None
         self.disk_model = disk_model(DISK_DEV)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -820,6 +925,8 @@ class Collector:
         input_power = inp["power"] if input_on else 0.0
         zram = sample_zram()
         iio_temps = sample_iio_temps()
+        gpu = sample_gpu(self._prev_gpu)
+        self._prev_gpu = gpu if gpu["present"] else None
         if now - self._wifi_ts >= WIFI_EVERY:
             wifi = sample_wifi(net["primary"])
             if wifi:
@@ -966,6 +1073,7 @@ class Collector:
             },
             "io": io,
             "netq": netq,
+            "gpu": gpu,
             "charger": charger,
             "battery": battery | {
                 "remaining": batt_remaining,
@@ -1000,6 +1108,8 @@ class Collector:
             "io_r": round(io["read_bps"] / 1024.0, 1),
             "io_w": round(io["write_bps"] / 1024.0, 1),
             "retx": netq["retx_pct"],
+            "gpu_act": gpu["active_pct"] if gpu["present"] else 0.0,
+            "gpu_freq": gpu["freq_mhz"] if gpu["present"] else 0.0,
         }
         for core in cores[:8]:
             values[f"core{core['index']}"] = core["usage"]

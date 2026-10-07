@@ -1,112 +1,134 @@
 {
  "ok": true,
- "now": 1789892753.2801683,
+ "now": 1791401153.1198452,
  "series": {
   "cpu": [
-   0.0,
-   1.0,
-   1.7,
-   11.7,
-   0.4,
-   0.6,
-   0.2,
-   0.5
+   50.0,
+   3.2,
+   4.7,
+   14.1,
+   4.2,
+   2.4,
+   2.2,
+   2.5,
+   2.8,
+   3.4
   ],
   "temp": [
-   37.2,
-   36.8,
-   37.2,
    37.4,
+   37.1,
+   37.0,
+   37.3,
+   37.1,
    37.2,
-   36.9,
-   36.9,
+   37.0,
+   37.1,
+   37.0,
    37.0
   ],
   "mem": [
-   13.9,
-   13.9,
-   13.9,
-   13.9,
-   13.9,
-   13.9,
-   13.9,
-   13.9
+   33.3,
+   33.3,
+   33.3,
+   33.4,
+   33.4,
+   33.3,
+   33.3,
+   33.3,
+   33.3,
+   33.4
   ],
   "disk": [
-   42.3,
-   42.3,
-   42.3,
-   42.3,
-   42.3,
-   42.3,
-   42.3,
-   42.3
+   80.7,
+   80.7,
+   80.7,
+   80.7,
+   80.7,
+   80.7,
+   80.7,
+   80.7,
+   80.7,
+   80.7
   ],
   "rx": [
    0.0,
-   0.0,
-   4.5,
-   10.7,
-   1.7,
-   2.8,
-   0.6,
-   0.7
+   56.5,
+   66.8,
+   76.7,
+   56.2,
+   60.4,
+   58.8,
+   59.9,
+   61.8,
+   54.5
   ],
   "tx": [
    0.0,
-   0.0,
-   4.6,
-   18.3,
-   10.3,
-   76.7,
-   6.0,
-   5.9
+   73.2,
+   134.7,
+   375.9,
+   83.5,
+   82.0,
+   82.2,
+   82.3,
+   91.1,
+   351.1
   ],
   "power": [
-   1.62,
-   1.37,
-   1.95,
+   2.35,
+   1.1,
+   1.08,
+   2.45,
    1.44,
-   0.65,
-   0.68,
-   0.69,
-   0.65
+   1.12,
+   1.03,
+   1.67,
+   1.4,
+   1.22
   ],
   "batt": [
-   27.0,
-   27.0,
-   27.0,
-   27.0,
-   27.0,
-   27.0,
-   27.0,
-   27.0
+   91.0,
+   91.0,
+   91.0,
+   91.0,
+   91.0,
+   91.0,
+   91.0,
+   91.0,
+   91.0,
+   91.0
   ],
   "batt_cur": [
-   1034.2,
-   1036.1,
-   1035.2,
-   1031.2,
-   1031.2,
-   1029.3,
-   1031.7,
-   1031.7
+   -9.8,
+   -2.9,
+   -2.9,
+   -22.0,
+   -2.9,
+   -2.9,
+   -2.9,
+   -2.9,
+   -3.4,
+   -3.4
   ],
   "load": [
    0.27,
    0.27,
    0.27,
-   0.56,
-   0.56,
-   0.56,
-   0.56,
-   0.56
+   0.25,
+   0.25,
+   0.25,
+   0.25,
+   0.25,
+   0.23,
+   0.23
   ],
   "io_r": [
    0.0,
-   68.4,
    0.0,
-   330.8,
+   0.0,
+   309.6,
+   0.0,
+   0.0,
    0.0,
    0.0,
    0.0,
@@ -117,66 +139,104 @@
    0.0,
    0.0,
    0.0,
+   67.3,
    0.0,
    0.0,
-   51.2,
+   58.8,
+   0.0,
    0.0
   ],
   "retx": [
    0.0,
    0.0,
+   0.99,
+   1.13,
+   2.33,
    0.0,
-   0.82,
    0.0,
-   0.0,
-   0.0,
+   0.56,
+   0.56,
    0.0
   ],
   "batt_pow": [
-   4.35,
-   4.36,
-   4.36,
-   4.34,
-   4.34,
-   4.33,
-   4.34,
-   4.34
+   -0.04,
+   -0.01,
+   -0.01,
+   -0.09,
+   -0.01,
+   -0.01,
+   -0.01,
+   -0.01,
+   -0.01,
+   -0.01
+  ],
+  "gpu_act": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   100.0,
+   100.0,
+   100.0
+  ],
+  "gpu_freq": [
+   257.0,
+   257.0,
+   257.0,
+   257.0,
+   257.0,
+   257.0,
+   257.0,
+   710.0,
+   710.0,
+   710.0
   ],
   "core0": [
    0.0,
-   0.0,
-   4.0,
-   16.3,
-   2.0,
-   3.8,
-   0.0,
-   3.8
+   0.9,
+   3.0,
+   13.6,
+   11.0,
+   1.0,
+   3.0,
+   14.9,
+   16.8,
+   10.8
   ],
   "core1": [
    0.0,
-   0.9,
-   0.0,
-   15.5,
-   0.0,
-   0.0,
-   0.0,
-   0.0
+   2.8,
+   4.9,
+   11.5,
+   6.9,
+   14.7,
+   11.9,
+   1.0,
+   3.0,
+   2.9
   ],
   "core2": [
    0.0,
-   3.8,
+   1.9,
+   18.8,
+   17.3,
+   3.0,
+   1.0,
+   1.0,
    0.0,
-   14.4,
-   0.0,
-   0.0,
-   0.0,
-   1.0
+   1.0,
+   6.9
   ],
   "core3": [
    0.0,
-   0.9,
-   2.0,
-   3.8,
+   14.2,
+   3.9,
+   18.4,
+   4.9,
+   0.0,
    0.0,
    1.0,
    0.0,
@@ -184,19 +244,23 @@
   ],
   "core4": [
    0.0,
-   1.9,
-   4.0,
-   8.7,
+   3.7,
+   3.9,
+   19.2,
+   1.0,
+   2.9,
    0.0,
-   0.0,
-   0.0,
-   0.0
+   2.0,
+   2.0,
+   3.9
   ],
   "core5": [
    0.0,
+   0.9,
    1.9,
-   2.0,
-   6.9,
+   11.4,
+   1.0,
+   0.0,
    0.0,
    0.0,
    0.0,
@@ -205,8 +269,10 @@
   "core6": [
    0.0,
    0.0,
+   1.9,
+   13.5,
+   2.0,
    0.0,
-   14.3,
    0.0,
    0.0,
    0.0,
@@ -215,11 +281,13 @@
   "core7": [
    0.0,
    0.0,
-   1.9,
-   13.6,
+   2.0,
+   7.7,
+   5.0,
    0.0,
    0.0,
    0.0,
+   1.0,
    0.0
   ]
  },
@@ -238,6 +306,8 @@
   "io_w": 300,
   "retx": 300,
   "batt_pow": 300,
+  "gpu_act": 300,
+  "gpu_freq": 300,
   "core0": 300,
   "core1": 300,
   "core2": 300,
@@ -247,7 +317,7 @@
   "core6": 300,
   "core7": 300
  },
- "ts": 1789892752.3047516,
+ "ts": 1791401152.4860432,
  "interval": 1.0,
  "device": {
   "hostname": "device",
@@ -255,32 +325,32 @@
   "os": "postmarketOS edge",
   "kernel": "6.18.49",
   "arch": "aarch64",
-  "uptime": 3120.61,
-  "services": 25,
+  "uptime": 601.76,
+  "services": 27,
   "ip": "10.0.0.2",
   "iface": "wlan0",
   "cores": 8
  },
  "cpu": {
-  "total": 0.5,
+  "total": 3.4,
   "cores": [
    {
     "index": 0,
-    "usage": 3.8,
+    "usage": 10.8,
     "cur_mhz": 1901,
     "max_mhz": 1901,
     "policy": "policy0"
    },
    {
     "index": 1,
-    "usage": 0.0,
+    "usage": 2.9,
     "cur_mhz": 1901,
     "max_mhz": 1901,
     "policy": "policy0"
    },
    {
     "index": 2,
-    "usage": 1.0,
+    "usage": 6.9,
     "cur_mhz": 1901,
     "max_mhz": 1901,
     "policy": "policy0"
@@ -294,7 +364,7 @@
    },
    {
     "index": 4,
-    "usage": 0.0,
+    "usage": 3.9,
     "cur_mhz": 2458,
     "max_mhz": 2458,
     "policy": "policy4"
@@ -357,13 +427,13 @@
    }
   ],
   "load": {
-   "load1": 0.56,
-   "load5": 0.16,
-   "load15": 0.05,
+   "load1": 0.23,
+   "load5": 0.21,
+   "load15": 0.11,
    "running": 1,
-   "threads": 205
+   "threads": 272
   },
-  "processes": 184,
+  "processes": 217,
   "pressure": 0.0
  },
  "thermal": {
@@ -400,11 +470,11 @@
    },
    {
     "type": "pmi8998_die",
-    "celsius": 35.8
+    "celsius": 34.2
    },
    {
     "type": "chg",
-    "celsius": 39.1
+    "celsius": 36.6
    }
   ],
   "kernel_trips": [
@@ -421,17 +491,17 @@
   "critical": 80.0
  },
  "memory": {
-  "total": 3790622720,
-  "available": 3264655360,
-  "used": 525967360,
-  "free": 3293487104,
-  "cached": 253026304,
-  "buffers": 13361152,
-  "shmem": 966656,
-  "slab": 56717312,
+  "total": 3790606336,
+  "available": 2524008448,
+  "used": 1266597888,
+  "free": 2167918592,
+  "cached": 622460928,
+  "buffers": 55517184,
+  "shmem": 1515520,
+  "slab": 101830656,
   "swap_total": 5685374976,
   "swap_used": 0,
-  "percent": 13.9,
+  "percent": 33.4,
   "zram": {
    "orig": 4096,
    "compr": 59,
@@ -452,9 +522,9 @@
     "path": "/",
     "label": "System",
     "total": 6472687616,
-    "used": 2738397184,
-    "free": 3383812096,
-    "percent": 42.3
+    "used": 5221101568,
+    "free": 901107712,
+    "percent": 80.7
    },
    {
     "path": "/boot",
@@ -468,30 +538,30 @@
     "path": "/data",
     "label": "Data",
     "total": 54735613952,
-    "used": 16873807872,
-    "free": 37845028864,
-    "percent": 30.8
+    "used": 8774041600,
+    "free": 45944795136,
+    "percent": 16.0
    }
   ],
   "root": {
    "path": "/",
    "label": "System",
    "total": 6472687616,
-   "used": 2738397184,
-   "free": 3383812096,
-   "percent": 42.3
+   "used": 5221101568,
+   "free": 901107712,
+   "percent": 80.7
   }
  },
  "network": {
   "iface": "wlan0",
   "ip": "10.0.0.2",
-  "rx_rate": 767.0,
-  "tx_rate": 6062.9,
-  "rx_total": 1356877,
-  "tx_total": 3693835,
+  "rx_rate": 55772.9,
+  "tx_rate": 359509.7,
+  "rx_total": 7315253,
+  "tx_total": 33594201,
   "wifi": {
    "ssid": "HomeNetwork",
-   "signal": 75,
+   "signal": 100,
    "freq": "5745 MHz",
    "rate": "1170 Mbit/s",
    "channel": "149",
@@ -506,12 +576,12 @@
   "read_iops": 0.0,
   "write_iops": 0.0,
   "util_pct": 0.0,
-  "read_total": 256049152,
-  "write_total": 26513408
+  "read_total": 974245888,
+  "write_total": 103284736
  },
  "netq": {
   "rx_errors": 0,
-  "rx_dropped": 2,
+  "rx_dropped": 0,
   "rx_crc_errors": 0,
   "tx_errors": 0,
   "tx_dropped": 0,
@@ -519,59 +589,98 @@
   "link_changes": 2,
   "iface": "wlan0",
   "retx_pct": 0.0,
-  "curr_estab": 3,
-  "retrans_total": 730,
-  "in_errs": 1,
-  "out_rsts": 3
+  "curr_estab": 6,
+  "retrans_total": 734,
+  "in_errs": 0,
+  "out_rsts": 74
+ },
+ "gpu": {
+  "present": true,
+  "dev": "5000000.gpu",
+  "freq_mhz": 710.0,
+  "target_mhz": 257.0,
+  "min_mhz": 257.0,
+  "max_mhz": 710.0,
+  "governor": "simple_ondemand",
+  "polling_ms": 50,
+  "steps": [
+   257.0,
+   342.0,
+   414.0,
+   515.0,
+   596.0,
+   670.0,
+   710.0
+  ],
+  "residency": [
+   {
+    "mhz": 257.0,
+    "ms": 3653000
+   },
+   {
+    "mhz": 710.0,
+    "ms": 51100
+   },
+   {
+    "mhz": 515.0,
+    "ms": 10000
+   }
+  ],
+  "state": "active",
+  "active_pct": 100.0,
+  "irq": 98,
+  "irq_rate": 0.0,
+  "_act": 3808,
+  "_sus": 536348
  },
  "charger": {
   "present": true,
   "online": true,
-  "status": "Charging",
+  "status": "Not charging",
   "health": "Good",
-  "usb_type": "DCP",
-  "current_max_ma": 1500,
-  "current_now_ma": 1022,
-  "voltage": 4.883,
-  "behaviour": "auto",
-  "inhibited": false
+  "usb_type": "SDP",
+  "current_max_ma": 500,
+  "current_now_ma": 0,
+  "voltage": 0.0,
+  "behaviour": "inhibit-charge",
+  "inhibited": true
  },
  "battery": {
   "present": true,
-  "capacity": 27,
-  "status": "Charging",
-  "charging": true,
-  "direction": "in",
-  "voltage": 4.21,
-  "current": -1.032,
-  "current_ma": -1031.7,
-  "current_ma_signed": 1031.7,
-  "power": 4.344,
-  "power_abs": 4.344,
+  "capacity": 91,
+  "status": "Not charging",
+  "charging": false,
+  "direction": "out",
+  "voltage": 4.226,
+  "current": 0.003,
+  "current_ma": 3.4,
+  "current_ma_signed": -3.4,
+  "power": -0.014,
+  "power_abs": 0.014,
   "temp": 33.5,
   "health": "Good",
   "technology": "Li-poly",
   "design_capacity_mah": 3300,
   "charger_type": "USB",
-  "charger_status": "Charging",
-  "remaining": null,
-  "system_power": 0.647,
+  "charger_status": "Not charging",
+  "remaining": 3179647,
+  "system_power": 1.221,
   "source": "usb",
-  "input_power": 4.991,
-  "input_voltage": 4.883,
-  "input_current_ma": 1022.2,
-  "batt_in_power": 4.344
+  "input_power": 1.207,
+  "input_voltage": 5.039,
+  "input_current_ma": 239.4,
+  "batt_in_power": 0.0
  },
  "system": {
   "load": {
-   "load1": 0.56,
-   "load5": 0.16,
-   "load15": 0.05,
+   "load1": 0.23,
+   "load5": 0.21,
+   "load15": 0.11,
    "running": 1,
-   "threads": 205
+   "threads": 272
   },
-  "processes": 184,
-  "services": 25,
+  "processes": 217,
+  "services": 27,
   "pressure": {
    "cpu": {
     "avg10": 0.0,
@@ -582,29 +691,39 @@
    "io": {
     "avg10": 0.0,
     "avg60": 0.0,
-    "avg300": 0.0,
-    "total": 1910603.0
+    "avg300": 0.07,
+    "total": 2980044.0
    },
    "memory": {
     "avg10": 0.0,
     "avg60": 0.0,
     "avg300": 0.0,
-    "total": 0.0
+    "total": 1.0
    }
   },
   "top": [
    {
-    "name": "python3",
+    "name": "MainThread",
     "pid": "0",
-    "cpu": 2.9
+    "cpu": 16.7
    },
    {
     "name": "napi/dummy#-0",
     "pid": "0",
+    "cpu": 2.5
+   },
+   {
+    "name": "python3",
+    "pid": "0",
+    "cpu": 2.0
+   },
+   {
+    "name": "kworker/u33:4-events_unbound",
+    "pid": "0",
     "cpu": 0.5
    },
    {
-    "name": "kworker/u35:0-ufs_clk_gating_0",
+    "name": "kworker/u33:3-flush-7:0",
     "pid": "0",
     "cpu": 0.5
    }

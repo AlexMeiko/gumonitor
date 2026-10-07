@@ -321,7 +321,7 @@ console.log('Edge version =', browser.version(), '\n');
 
   // 点另一个磁贴：右栏应该是**替换**内容，不是叠加
   await page.screenshot({ path: path.join(OUT, 'pw-desktop-detail.png') });
-  await page.locator('.tile').nth(7).click();         // 7 = Battery
+  await page.locator('.tile', { hasText: 'Battery' }).first().click();
   await page.waitForTimeout(700);
   const swapped = await page.evaluate(() => ({
     title: document.querySelector('#detail .detail-bar h2')?.textContent || '',
@@ -356,6 +356,11 @@ console.log('Edge version =', browser.version(), '\n');
         !!battPow && !hasSign(battPow.v), battPow ? battPow.v : '(缺)');
   const cur = rows.find((r) => r.k === 'Battery Current');
   check('统计面板有 Battery Current 行', !!cur, cur ? cur.v : '(缺)');
+  // GPU 是可选装的：有 GPU 时才多这两行
+  const gpuAct = rows.find((r) => r.k === 'GPU Active');
+  check('统计面板有 GPU Active 与 GPU Frequency 两行',
+        !!gpuAct && rows.some((r) => r.k === 'GPU Frequency'),
+        gpuAct ? gpuAct.v : '(缺)');
 
   await ctx.close();
 }
@@ -469,10 +474,26 @@ console.log('Edge version =', browser.version(), '\n');
   const tileNames = () => page.evaluate(() =>
     Array.from(document.querySelectorAll('.tile .name')).map((e) => e.textContent.trim()));
   const names = await tileNames();
-  check('首页 9 块磁贴（Power Draw 已合并进 Battery）',
-        names.length === 9 && !names.includes('Power Draw'), names.join(' / '));
+  check('首页 10 块磁贴（Power Draw 已合并进 Battery，新增 GPU）',
+        names.length === 10 && !names.includes('Power Draw'), names.join(' / '));
   check('首页有 Storage I/O 与 Link Quality',
         names.includes('Storage I/O') && names.includes('Link Quality'), names.join(' / '));
+  check('首页有 GPU 磁贴', names.includes('GPU'), names.join(' / '));
+
+  // GPU 磁贴：大字 = 上电时间占比，灰字 = 当前频率
+  const gpuTile = await page.evaluate(() => {
+    const t = Array.from(document.querySelectorAll('.tile'))
+      .find((e) => e.querySelector('.name')?.textContent.trim() === 'GPU');
+    if (!t) return null;
+    return {
+      value: t.querySelector('.value')?.textContent.trim(),
+      badge: t.querySelector('.badge')?.textContent.trim(),
+      shown: getComputedStyle(t).display !== 'none',
+    };
+  });
+  check('GPU 磁贴显示占比与频率', !!gpuTile && gpuTile.shown &&
+        /%$/.test(gpuTile.value || '') && /MHz$/.test(gpuTile.badge || ''),
+        gpuTile ? `${gpuTile.value} · ${gpuTile.badge}` : '(缺 GPU 磁贴)');
 
   const rows = () => page.evaluate(() => Array.from(
     document.querySelectorAll('#detail .info-card .row')).map((r) => ({
@@ -482,8 +503,15 @@ console.log('Edge version =', browser.version(), '\n');
   const zoneText = () => page.evaluate(() => Array.from(
     document.querySelectorAll('#detail .core-card')).map((e) => e.textContent.trim()).join(' | '));
 
-  const openTile = async (idx) => {
-    await page.locator('.tile').nth(idx).click();
+  // 按**磁贴名**定位，不用数字下标 —— TILE_ORDER 里插一张卡（比如 GPU）
+  // 就会让后面所有下标整体后移，按数字写断言迟早静默点错磁贴
+  const TILE_LABEL = {
+    cpu: 'CPU Load', gpu: 'GPU', temp: 'Temperature', memory: 'Memory', disk: 'Disk',
+    io: 'Storage I/O', traffic: 'Traffic', netq: 'Link Quality', battery: 'Battery',
+    system: 'System Load',
+  };
+  const openTile = async (id) => {
+    await page.locator('.tile', { hasText: TILE_LABEL[id] }).first().click();
     await page.waitForTimeout(650);
     const title = await page.evaluate(() =>
       document.querySelector('#detail .detail-bar h2')?.textContent.trim() || '');
@@ -495,8 +523,7 @@ console.log('Edge version =', browser.version(), '\n');
   };
   const findRow = (list, key) => list.find((r) => r.k === key);
 
-  // 4=io, 5=traffic, 6=netq, 7=battery, 1=temp, 2=memory（见 TILE_ORDER）
-  const ioTitle = await openTile(4);
+  const ioTitle = await openTile('io');
   const ioRows = await rows();
   check('Storage I/O 详情页能打开', ioTitle === 'Storage I/O', ioTitle);
   check('Storage I/O 有设备名与繁忙度',
@@ -505,7 +532,25 @@ console.log('Edge version =', browser.version(), '\n');
   await page.screenshot({ path: path.join(OUT, 'pw-detail-io.png') });
   await closeTile();
 
-  const trTitle = await openTile(5);
+  // ---- GPU ----
+  const gpuTitle = await openTile('gpu');
+  const gpuRows = await rows();
+  check('GPU 详情页能打开', gpuTitle === 'GPU', gpuTitle);
+  check('GPU 有频率档位与 governor',
+        !!findRow(gpuRows, 'Frequency Steps') && !!findRow(gpuRows, 'Governor'),
+        `${findRow(gpuRows, 'Frequency Steps')?.v} · ${findRow(gpuRows, 'Governor')?.v}`);
+  // 这台机器上没有 SM 占用率传感器，读数是"上电时间占比"。
+  // 这行是防误导的护栏：谁把它改成 Utilization 就该失败。
+  check('GPU 标明了读数含义（不是 SM 占用率）',
+        /powered-on/i.test(findRow(gpuRows, 'Measured As')?.v || ''),
+        findRow(gpuRows, 'Measured As')?.v || '(缺)');
+  const gpuCharts = await page.evaluate(() =>
+    document.querySelectorAll('#detail .chart-card .chart-svg').length);
+  check('GPU 详情页有占比主图 + 频率副图', gpuCharts === 2, `chart-svg=${gpuCharts}`);
+  await page.screenshot({ path: path.join(OUT, 'pw-detail-gpu.png') });
+  await closeTile();
+
+  const trTitle = await openTile('traffic');
   const trRows = await rows();
   check('Traffic 详情页带 WiFi 链路信息',
         trTitle === 'Traffic' && (findRow(trRows, 'Wi-Fi Network')?.v || '') !== '' &&
@@ -523,7 +568,7 @@ console.log('Edge version =', browser.version(), '\n');
   await page.screenshot({ path: path.join(OUT, 'pw-detail-traffic.png') });
   await closeTile();
 
-  const nqTitle = await openTile(6);
+  const nqTitle = await openTile('netq');
   const nqRows = await rows();
   check('Network Quality 详情页能打开',
         nqTitle === 'Network Quality' && !!findRow(nqRows, 'TCP Connections'),
@@ -531,7 +576,7 @@ console.log('Edge version =', browser.version(), '\n');
   await page.screenshot({ path: path.join(OUT, 'pw-detail-netq.png') });
   await closeTile();
 
-  const batTitle = await openTile(7);
+  const batTitle = await openTile('battery');
   const batRows = await rows();
   check('Battery 详情页带充电详情',
         batTitle === 'Battery' && !!findRow(batRows, 'Charger') && !!findRow(batRows, 'Charging Mode'),
@@ -665,19 +710,43 @@ console.log('Edge version =', browser.version(), '\n');
   await page.screenshot({ path: path.join(OUT, 'pw-detail-battery.png') });
   await closeTile();
 
-  await openTile(1);
+  await openTile('temp');
   const zones = await zoneText();
   check('Temperature 详情页有 IIO 的 skin / chg 温度点',
         /skin/i.test(zones) && /chg/i.test(zones), zones.slice(0, 120));
   await closeTile();
 
-  await openTile(2);
+  await openTile('memory');
   const memRows = await rows();
   check('Memory 详情页有 Zram 压缩信息',
         !!findRow(memRows, 'Zram Compressed') && !!findRow(memRows, 'Zram Saved'),
         `${findRow(memRows, 'Zram Compressed')?.v}`);
   await page.screenshot({ path: path.join(OUT, 'pw-detail-memory.png') });
   await closeTile();
+
+  // 没有 GPU 的设备（别的手机可能还没把 GPU 跑起来）：这块磁贴应该整块隐藏，
+  // 而不是留一个永远显示"—"的空位。用一份 gpu.present=false 的快照重载来验。
+  // page.route 是后注册的优先，所以这个 handler 会盖住上面 routeAll 的那个。
+  await page.route('**/api/state', async (route) => {
+    const j = JSON.parse(fs.readFileSync(STATE, 'utf8'));
+    j.gpu = { present: false };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(j) });
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => document.querySelectorAll('.tile').length > 0, { timeout: 8000 });
+  await page.waitForTimeout(600);
+  const noGpu = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('.tile')];
+    const gpu = all.find((e) => e.querySelector('.name')?.textContent.trim() === 'GPU');
+    return {
+      total: all.length,
+      visible: all.filter((e) => getComputedStyle(e).display !== 'none').length,
+      gpuHidden: !gpu || getComputedStyle(gpu).display === 'none',
+    };
+  });
+  check('没有 GPU 的设备：磁贴整块隐藏（不留空位、不显示"—"）',
+        noGpu.gpuHidden && noGpu.total === 10 && noGpu.visible === 9,
+        `共 ${noGpu.total} 块，显示 ${noGpu.visible} 块`);
 
   await ctx.close();
 }

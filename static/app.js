@@ -376,9 +376,13 @@ function drawChart(inst, spec, series, meta) {
     const dmin = Math.min(...all);
     const dmax = Math.max(...all);
     const fmtR = spec.format || ((v) => String(v));
+    // 整段不变时不要写成 "257 MHz – 257 MHz"（看着像坏了）；
+    // 这种平线本来也容易被当成"没数据"，所以明说它是恒定的
+    const label = Math.abs(dmax - dmin) < 1e-9
+      ? `${fmtR(dmax)} (steady)` : `${fmtR(dmin)} – ${fmtR(dmax)}`;
     out += `<text x="${(padL + 2).toFixed(1)}" y="${(padT - 3).toFixed(1)}" ` +
            `font-size="10" font-weight="600" fill="${COLORS.gray}" opacity="0.9">` +
-           `${fmtR(dmin)} – ${fmtR(dmax)}</text>`;
+           `${label}</text>`;
   }
 
   inst.svg.setAttribute('viewBox', `0 0 ${w} ${hgt}`);
@@ -819,6 +823,82 @@ const METRICS = {
     },
   },
 
+  gpu: {
+    label: 'GPU', icon: 'chip', color: 'purple',
+    // 没有 GPU 的设备（比如别的手机还没把 GPU 跑起来）整块隐藏，
+    // 而不是留一块永远显示"—"的磁贴
+    hidden: (d) => !d.gpu || !d.gpu.present,
+    // 大字 = 上电时间占比；灰字 = 当前频率（放得下，且是第二个最有用的数）
+    tile: (d) => ({
+      badge: `${d.gpu.freq_mhz.toFixed(0)} MHz`,
+      value: `${d.gpu.active_pct.toFixed(0)}%`,
+      bar: { pct: d.gpu.active_pct, color: levelColor(d.gpu.active_pct, 50, 85) },
+    }),
+    detail: (d) => {
+      const g = d.gpu;
+      const act = g.active_pct;
+      // 这台机器上**没有**真正的 SM 占用率传感器（drm 没导出 gpu_busy_percent，
+      // devfreq 也不暴露 busy_time）。能测到的是 runtime PM 的上电时间占比，
+      // 所以文案一律说 "Active"，不要写成 Utilization —— 两者不是一回事：
+      // 上电但没派满的那段时间也会被算进来，读数会略高于真占用率。
+      const suspended = g.state !== 'active';
+      return {
+        title: 'GPU',
+        name: 'GPU', icon: 'chip', color: 'purple',
+        badge: `${g.freq_mhz.toFixed(0)} MHz`,
+        big: `${act.toFixed(0)}%`,
+        status: statusWord(act >= 85 ? 'elevated' : 'normal', {
+          normal: suspended ? 'Idle — runtime suspended' : 'Awake, mostly idle',
+          elevated: 'Sustained GPU load',
+        }),
+        chart: {
+          lines: [{ key: 'gpu_act', color: 'purple' }],
+          fromZero: true,
+          minSpan: 100,
+          format: (x) => `${x.toFixed(0)}%`,
+        },
+        // 频率单独一张矮图：MHz 和 % 差两个数量级，画一起会互相压平
+        miniChart: {
+          title: 'Frequency',
+          lines: [{ key: 'gpu_freq', color: 'cyan' }],
+          tight: true,
+          minSpan: 100,
+          format: (x) => `${x.toFixed(0)} MHz`,
+        },
+        stats: false,
+        averages: (series) => {
+          const a = series.gpu_act || [];
+          const f = series.gpu_freq || [];
+          // 每点代表 interval 秒，占比之和换算成"这一窗口里 GPU 醒着多久"。
+          // 不用"忙碌样本占比"，那和 Avg Active 在真机上基本是同一个数
+          // （每秒的占比非 0 即 100）。
+          const awake = avg(a) / 100 * a.length * (d.interval || 1);
+          // fmtDuration 最小单位是分钟（12 秒会显示成 "0m"），秒级单独处理
+          const awakeTxt = !a.length ? '—'
+            : awake >= 60 ? fmtDuration(awake)
+            : `${awake.toFixed(awake < 10 ? 1 : 0)}s`;   // 别把 0.5s 显示成 "0s"
+          return [
+            ['Avg Active (5 min)', `${avg(a).toFixed(1)}%`],
+            ['Active Time (5 min)', awakeTxt],
+            ['Avg Frequency (5 min)', `${avg(f).toFixed(0)} MHz`],
+          ];
+        },
+        info: () => [
+          ['Device', g.dev],
+          ['State', g.state],
+          ['Frequency', `${g.freq_mhz.toFixed(0)} / ${g.max_mhz.toFixed(0)} MHz`],
+          ['Frequency Steps', g.steps.length
+            ? `${g.steps.length} (${g.steps[0].toFixed(0)}–${g.steps[g.steps.length - 1].toFixed(0)} MHz)`
+            : '—'],
+          ['Governor', `${g.governor} · ${g.polling_ms} ms`],
+          ['Interrupts', `${g.irq} (${g.irq_rate.toFixed(1)}/s)`],
+          // 把"这个数到底是什么"直接写在界面上，别让人当成 SM 占用率
+          ['Measured As', 'Powered-on time (no SM counter)'],
+        ],
+      };
+    },
+  },
+
   netq: {
     label: 'Link Quality', icon: 'wifi', color: 'cyan',
     // 大字 = TCP 重传率（重传段数 / 发出段数），这是判断链路好坏最直接的量；
@@ -905,7 +985,7 @@ const METRICS = {
 };
 
 // power 已于 2026-09-14 合并进 battery（同一份数据源、详情页字段重复）
-const TILE_ORDER = ['cpu', 'temp', 'memory', 'disk', 'io', 'traffic', 'netq', 'battery', 'system'];
+const TILE_ORDER = ['cpu', 'gpu', 'temp', 'memory', 'disk', 'io', 'traffic', 'netq', 'battery', 'system'];
 
 /* -------------------------------------------------------- 布局模式（断点） */
 /* 手机（<1024px）：单栏，点磁贴 → 全屏滑入的详情层，是「模态」。
@@ -928,6 +1008,28 @@ let currentDetail = null;
 let tileRefs = {};
 const chartCards = {};   // detail 内的图表实例
 
+/* 这个指标在这台设备上是否存在。某些指标是按设备可选装的（比如 GPU），
+   没有的机器上既不该显示磁贴，也不该被默认选中或深链打开。 */
+function metricAvailable(id, d) {
+  const m = METRICS[id];
+  if (!m) return false;
+  if (!m.hidden) return true;
+  try {
+    return !m.hidden(d);
+  } catch (err) {
+    return true;   // 判定失败就当它可用，总比什么都不选好
+  }
+}
+
+/* 这台设备上第一个**存在**的指标（桌面端默认选中它）。
+   不能直接用 TILE_ORDER[0]：默认选中一个被隐藏的指标会得到一个空白右栏。 */
+function firstVisible(d) {
+  for (const id of TILE_ORDER) {
+    if (metricAvailable(id, d)) return id;
+  }
+  return TILE_ORDER[0];
+}
+
 /* -------------------------------------------------------------- 首页渲染 */
 function buildHome() {
   const grid = $('#tileGrid');
@@ -946,8 +1048,12 @@ function buildHome() {
       <div class="value">—</div>
       <div class="bar"><i></i></div>`;
     tile.addEventListener('click', () => openDetail(id));
+    // 指标可能在这台设备上不存在（比如没有 GPU），先建后隐藏，
+    // updateHome() 每轮都会按最新数据重算
+    if (m.hidden) tile.dataset.conditional = '1';
     grid.appendChild(tile);
     tileRefs[id] = {
+      el: tile,
       badge: $('.badge', tile),
       value: $('.value', tile),
       fill: $('.bar > i', tile),
@@ -1006,6 +1112,15 @@ function updateHome() {
   for (const id of TILE_ORDER) {
     const ref = tileRefs[id];
     if (!ref) continue;
+    const m = METRICS[id];
+    // 不存在的指标整块隐藏（不是显示成"—"）。放在 try 外面：
+    // 判定本身依赖数据，但绝不能因此让这块磁贴卡在上一轮的状态
+    if (m.hidden) {
+      let hide = true;
+      try { hide = !!m.hidden(d); } catch (err) { console.warn(`hidden check failed: ${id}`, err); }
+      ref.el.style.display = hide ? 'none' : '';
+      if (hide) continue;
+    }
     // 每块磁贴单独兜底：任何一个指标算错（比如引用了不存在的函数）都只影响它自己，
     // 不会让后面的磁贴全部停在初始的"—"上（那种"静默半死"很难查）。
     try {
@@ -1024,6 +1139,9 @@ function updateHome() {
 /* -------------------------------------------------------------- 详情页 */
 function openDetail(id) {
   if (!DATA) return;
+  // 兜底：这台设备上没有的指标（比如没 GPU）不打详情页，否则 d.gpu 是 undefined，
+  // 后面会抛错留一个空右栏
+  if (!metricAvailable(id, DATA)) return;
   const m = METRICS[id];
   const spec = m.detail(DATA, DATA.series);
 
@@ -1350,6 +1468,11 @@ function openHistory() {
       ['Battery Current', 'batt_cur', (x) => `${x.toFixed(0)} mA`, true],
       ['Load 1m', 'load', (x) => x.toFixed(2)],
     ];
+    // GPU 是可选装的：没有 GPU 的设备不加这两行，否则会多出一排恒为 0 的统计
+    if (d.gpu && d.gpu.present) {
+      rowsFor.push(['GPU Active', 'gpu_act', (x) => `${x.toFixed(0)}%`]);
+      rowsFor.push(['GPU Frequency', 'gpu_freq', (x) => `${x.toFixed(0)} MHz`]);
+    }
     card.innerHTML = rowsFor.map(([label, key, fmt, abs]) => {
       let v = (d.series[key] || []).map(Number);
       if (abs) v = v.map(Math.abs);
@@ -1423,7 +1546,7 @@ function boot() {
   // 跨越 1024px 断点时布局变了（单栏模态 ↔ 双栏常驻），图表高度也跟着变
   // （168 ↔ 260），所以必须按当前指标重建一次图表。
   DESKTOP_MQ.addEventListener('change', (e) => {
-    const id = currentDetail ? currentDetail.id : (e.matches ? TILE_ORDER[0] : null);
+    const id = currentDetail ? currentDetail.id : (e.matches ? firstVisible(DATA) : null);
     if (id) openDetail(id);
     else $('#detail').innerHTML = '';
   });
@@ -1436,7 +1559,9 @@ function boot() {
   const LEGACY_DEEP = { power: 'battery' };
   const raw = (location.hash || '').replace('#', '');
   const deep = LEGACY_DEEP[raw] || raw;
-  const wanted = deep && METRICS[deep] ? deep : (isDesktop() ? TILE_ORDER[0] : null);
+  // #gpu 这类深链也要过一遍可用性：别的设备上没有 GPU 时不该打开一个空详情页
+  const wanted = deep && metricAvailable(deep, DATA)
+    ? deep : (isDesktop() ? firstVisible(DATA) : null);
   if (wanted) {
     const wait = setInterval(() => {
       if (DATA) { clearInterval(wait); openDetail(wanted); }
