@@ -6,6 +6,9 @@ deploy.local.sh
 .workbuddy/
 .Trash-*/
 
+# 开发笔记：含内网地址、设备实测清单等本机信息，公开仓库里不要
+note.md
+
 # 测试产物
 tests/shots/
 tests/.tmp/
