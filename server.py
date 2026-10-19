@@ -59,8 +59,10 @@ SERIES_KEYS = [
     # power = 整机功耗，batt_pow = 电池端功率（两者插电时能差两个数量级，
     # 详情页把它们画在同一张图上对比）
     "batt_pow",
-    # gpu_act = GPU 上电时间占比（不是 SM 占用率），gpu_freq = 当前频率 MHz
-    "gpu_act", "gpu_freq",
+    # gpu_irq = GPU 作业完成中断速率（Hz，活动强度；msm 上拿不到真占用率，
+    #           fdinfo 的 engine time 恒 0、trans_stat 变频才结算、PM 占比会被钉死）
+    # gpu_act = GPU 上电时间占比（runtime PM；被刻意钉住不挂起时恒 100%，仅参考）
+    "gpu_irq", "gpu_act", "gpu_freq",
 ] + [f"core{i}" for i in range(min(NR_CORES, 8))]
 
 
@@ -619,25 +621,122 @@ def find_gpu_devfreq() -> str | None:
     return None
 
 
-def sample_gpu(prev: dict | None) -> dict:
-    """GPU：频率档位 + runtime PM 上电时间占比。
+def scan_drm_clients() -> tuple[dict, dict]:
+    """扫 /proc/*/fdinfo/*，收集当前打开 DRM 设备的进程（客户端列表）。
 
-    注意这台机器上**没有真正的 SM 占用率**：drm 设备没导出 gpu_busy_percent，
-    devfreq 也没暴露 busy_time/total_time，debugfs 里的那些是 root-only。
-    能拿到的是一个定义清晰、内核自己在算的量 ——
-    **runtime PM 的 active 时间占比**（GPU 上电/未挂起的时间占多少）。
-    GPU 空闲时会自动 runtime suspend，所以这个数低就说明确实没什么活，
-    但它会把"上电但还没派满"的那段时间也算成忙，因此会略高于真占用率。
-    界面上按"Active"呈现，不要写成 Utilization，免得被当成 SM 占用率。
+    返回 (busy, meta)：
+      busy = {client_id: 该客户端的 drm-engine-* 纳秒数}
+      meta = {client_id: {"comm": 进程名, "pid": pid, "mem_kib": 显存 KiB}}
+
+    内核在 /proc/<pid>/fdinfo/<fd> 里为 DRM 文件额外导出一份统计
+    （drm-driver / drm-client-id / drm-engine-gpu / drm-total-memory）。
+
+    ⚠️ **msm 上 busy 是不可用的**：`drm-engine-gpu` 字段存在但从不更新，
+    实测 freedreno 硬件渲染 12000 帧/秒 × 12 秒读数恒 0（见 note.md §9）。
+    所以这个函数的实际用途是拿 **客户端列表 + 显存**：哪些进程开着
+    /dev/dri/*、各占多少显存。没有客户端（没人打开 DRM 设备）就是真空载。
+    忙时间仍然返回，别的平台（amdgpu/i915/panfrost）可能是真的，先留着。
+
+    去重键用 drm-client-id，**不能**用 (mnt_id, ino)：
+    字符设备节点（/dev/dri/renderD128）在 devtmpfs 里的 inode 是固定的，
+    同一个设备 open 两次 ino 相同但 client-id 不同 —— 拿 ino 去重会把两次
+    独立 open 误判成同一份。反过来，同一个 drm_file 的多个 fd（dup 或
+    fork 继承）client-id 相同，去重后正好剩一份。
+
+    权限：/proc/<pid>/fdinfo 属进程属主，其他用户读会被 EACCES 跳过。
+    所以客户端若不是同一用户，看板就统计不到 —— 采样尽力而为，不报错。
+    """
+    busy: dict[int, int] = {}
+    meta: dict[int, dict] = {}
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return busy, meta
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        fd_dir = f"/proc/{pid}/fdinfo"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        try:
+            with open(f"/proc/{pid}/comm", "r", encoding="utf-8", errors="replace") as fh:
+                comm = fh.read().strip()
+        except OSError:
+            comm = pid
+        for fd in fds:
+            try:
+                with open(f"{fd_dir}/{fd}", "r", encoding="utf-8", errors="replace") as fh:
+                    txt = fh.read()
+            except OSError:
+                continue
+            if "drm-client-id:" not in txt:
+                continue
+            cid = None
+            b = 0
+            mem = 0
+            for line in txt.splitlines():
+                key, _, val = line.partition(":")
+                key = key.strip()
+                val = val.strip()
+                if key == "drm-client-id":
+                    try:
+                        cid = int(val)
+                    except ValueError:
+                        pass
+                elif key.startswith("drm-engine-"):
+                    # 多引擎驱动会有多个 drm-engine-* 行，全加起来
+                    # （msm 只有 gpu 一个）
+                    try:
+                        b += int(val.split()[0])
+                    except (ValueError, IndexError):
+                        pass
+                elif key == "drm-total-memory":
+                    try:
+                        mem += int(val.split()[0])
+                    except (ValueError, IndexError):
+                        pass
+            if cid is None or cid in busy:
+                # 同一个 drm_file 的另一个 fd：忙时间是同一份，不能再累加；
+                # 显存也是同一份，取第一次看到的即可
+                continue
+            busy[cid] = b
+            meta[cid] = {"comm": comm, "pid": int(pid), "mem_kib": mem}
+    return busy, meta
+
+
+def sample_gpu(prev: dict | None) -> dict:
+    """GPU：活动强度（作业完成中断速率）+ 频率档位 + runtime PM 上电时间占比。
+
+    **这台设备上没有可靠的 GPU 占用率百分比**，逐一实测过都不可用：
+      * drm fdinfo 的 drm-engine-gpu：msm 6.18 导出了字段但从不更新
+        （freedreno 12000 帧/秒的 GL 负载下 12 秒零增长，恒 0）。
+      * devfreq trans_stat / 频率驻留：只在发生变频时结算上一段，
+        频率一锁死就完全不前进。
+      * runtime PM 上电时间占比：runtime suspend 被刻意禁用时恒 100%
+        （用户就是特意把 GPU 钉住不挂起的）。
+      * /sys/kernel/debug/dri/0/gpu 的 rbbm-status：root-only，看板读不到。
+
+    剩下真正随负载走、且不需要 root 的是 **gpu-irq 的中断速率**：
+    GPU 每完成一批作业产生一次中断，实测空载 0/s、重载 6k~12k/s。
+    它和"SM 占用率"不是一回事（每次中断对应的计算量不固定），
+    所以界面上按活动强度呈现（IRQ/s），**不要**写成 Utilization 百分比。
+
+    devfreq 的 trans_stat 只在**发生变频时**结算上一段，频率被锁死后
+    这个值不会前进，只能当"自开机累计"看。
     """
     base = find_gpu_devfreq()
-    if not base:
+    # 有 card0/renderD128 但没有 devfreq 的机器也认为 GPU 存在：
+    # 客户端列表和 irq 都不依赖 devfreq。两个都没有才算真没有 GPU。
+    has_card = os.path.isdir("/sys/class/drm/card0") or os.path.exists("/dev/dri/renderD128")
+    if not base and not has_card:
         return {"present": False}
 
-    cur = read_int(f"{base}/cur_freq", 0)
+    cur = read_int(f"{base}/cur_freq", 0) if base else 0
     out = {
         "present": True,
-        "dev": os.path.basename(base),
+        "dev": os.path.basename(base) if base else "drm",
         "freq_mhz": round(cur / 1e6, 1),
         "target_mhz": round(read_int(f"{base}/target_freq", cur) / 1e6, 1),
         "min_mhz": round(read_int(f"{base}/min_freq", 0) / 1e6, 1),
@@ -673,23 +772,47 @@ def sample_gpu(prev: dict | None) -> dict:
             out["residency"].append({"mhz": mhz, "ms": ms})
     out["residency"].sort(key=lambda r: -r["ms"])
 
+    # ---- GPU 活动强度：作业完成中断速率 ----
+    # 试过但**不可用**的路（都实测过，别再走）：
+    #   * drm fdinfo 的 drm-engine-gpu：msm 6.18 导出了字段但从不更新，
+    #     12000 帧/秒的 freedreno GL 负载下 12 秒零增长（恒 0）。
+    #   * devfreq trans_stat / 频率驻留：只在发生变频时结算，频率一锁就死。
+    #   * runtime PM 上电时间占比：runtime suspend 被刻意禁用时恒 100%。
+    #   * /sys/kernel/debug/dri/0/gpu 的 rbbm-status：root-only，看板读不到。
+    # 剩下真正随负载走、且不需要 root 的就是 **gpu-irq 的中断速率**：
+    # GPU 每完成一批作业产生一次中断，实测空载 0、重载 6k~12k/s。
+    # 它和 GPU 忙时间不是一回事（每次中断对应的计算量不固定），
+    # 界面上按"活动强度"呈现，别写成 Utilization 百分比。
+    clients, meta = scan_drm_clients()
+    names = sorted({m["comm"] for m in meta.values()})
+    out["clients"] = names[:8]
+    out["client_count"] = len(clients)
+    out["client_mem_kib"] = sum(m["mem_kib"] for m in meta.values())
+
     # runtime PM：active/suspended 的累计毫秒数是**实时前进**的（实测每秒 +1000），
     # 所以两次采样的差值就是这一段时间里 GPU 上电了多久。
+    # 注意：如果 runtime suspend 被刻意禁用，这个数会恒 100%，
+    # 那就只当"参考行"看，不当占用率 —— 活动强度看 irq_rate。
     pm = "/sys/class/drm/card0/device/power"
     out["state"] = read_text(f"{pm}/runtime_status") or "-"
     act = read_int(f"{pm}/runtime_active_time", 0)
     sus = read_int(f"{pm}/runtime_suspended_time", 0)
+    now_m = time.monotonic()
+    prev_m = (prev or {}).get("_ts", 0.0)
     if prev and prev.get("present"):
         d_act = max(0, act - prev["_act"])
         d_sus = max(0, sus - prev["_sus"])
         total = d_act + d_sus
         if total > 0:
             out["active_pct"] = round(d_act / total * 100.0, 1)
-        # 中断是"作业完成"触发的，计数速率能给一个活动强度的旁证
+        # 中断速率按**墙钟**时间算：PM 累计值在 runtime suspend 被禁用时
+        # 虽然也等于墙钟，但直接拿墙钟更直白，也不依赖 PM 文件可读
+        dt_m = now_m - prev_m if prev_m else 0.0
         d_irq = max(0, out["irq"] - prev["irq"])
-        out["irq_rate"] = round(d_irq / (total / 1000.0), 1) if total >= 1000 else 0.0
+        out["irq_rate"] = round(d_irq / dt_m, 1) if dt_m > 0.1 else 0.0
     out["_act"] = act
     out["_sus"] = sus
+    out["_ts"] = now_m
     return out
 
 
@@ -1073,7 +1196,8 @@ class Collector:
             },
             "io": io,
             "netq": netq,
-            "gpu": gpu,
+            # _fd/_ts/_act/_sus 是上一轮采样的私有状态，不外泄给前端
+            "gpu": {k: v for k, v in gpu.items() if not k.startswith("_")},
             "charger": charger,
             "battery": battery | {
                 "remaining": batt_remaining,
@@ -1108,6 +1232,7 @@ class Collector:
             "io_r": round(io["read_bps"] / 1024.0, 1),
             "io_w": round(io["write_bps"] / 1024.0, 1),
             "retx": netq["retx_pct"],
+            "gpu_irq": gpu["irq_rate"] if gpu["present"] else 0.0,
             "gpu_act": gpu["active_pct"] if gpu["present"] else 0.0,
             "gpu_freq": gpu["freq_mhz"] if gpu["present"] else 0.0,
         }

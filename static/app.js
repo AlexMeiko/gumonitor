@@ -108,6 +108,14 @@ function fmtDuration(sec) {
   return `${min}m`;
 }
 
+// GPU 活动强度（中断速率）。空载是 0，重载能到 6k~12k/s，
+// 所以 1000 以下直接给 Hz，以上折成 kHz —— 别让磁贴被一长串数字撑爆。
+function fmtIrq(hz) {
+  if (hz == null) return '—';
+  if (hz >= 1000) return `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)}k/s`;
+  return `${hz.toFixed(hz < 10 && hz > 0 ? 1 : 0)}/s`;
+}
+
 function fmtMHz(mhz) {
   if (!mhz) return '—';
   return `${(mhz / 1000).toFixed(2)} GHz`;
@@ -828,36 +836,38 @@ const METRICS = {
     // 没有 GPU 的设备（比如别的手机还没把 GPU 跑起来）整块隐藏，
     // 而不是留一块永远显示"—"的磁贴
     hidden: (d) => !d.gpu || !d.gpu.present,
-    // 大字 = 上电时间占比；灰字 = 当前频率（放得下，且是第二个最有用的数）
+    // 大字 = 作业完成中断速率（活动强度）；灰字 = 当前频率。
+    // 这台设备拿不到真占用率百分比（fdinfo 的 engine time 恒 0、
+    // trans_stat 变频才结算、PM 占比会被钉死），irq 速率是实测
+    // 唯一随负载走的信号：空载 0/s、重载 6k~12k/s。
     tile: (d) => ({
       badge: `${d.gpu.freq_mhz.toFixed(0)} MHz`,
-      value: `${d.gpu.active_pct.toFixed(0)}%`,
-      bar: { pct: d.gpu.active_pct, color: levelColor(d.gpu.active_pct, 50, 85) },
+      value: fmtIrq(d.gpu.irq_rate),
+      bar: { pct: Math.min(100, d.gpu.irq_rate / 100), color: levelColor(d.gpu.irq_rate, 2000, 6000) },
     }),
     detail: (d) => {
       const g = d.gpu;
-      const act = g.active_pct;
-      // 这台机器上**没有**真正的 SM 占用率传感器（drm 没导出 gpu_busy_percent，
-      // devfreq 也不暴露 busy_time）。能测到的是 runtime PM 的上电时间占比，
-      // 所以文案一律说 "Active"，不要写成 Utilization —— 两者不是一回事：
-      // 上电但没派满的那段时间也会被算进来，读数会略高于真占用率。
-      const suspended = g.state !== 'active';
+      const irq = g.irq_rate;
+      // 活动强度来自 gpu-irq 的速率：GPU 每完成一批作业产生一次中断。
+      // 它和"SM 占用率"不是一回事（每次中断的计算量不固定），
+      // 所以界面上写 Activity / IRQ rate，不写 Utilization 百分比。
+      const idle = irq < 1 && g.client_count === 0;
       return {
         title: 'GPU',
         name: 'GPU', icon: 'chip', color: 'purple',
         badge: `${g.freq_mhz.toFixed(0)} MHz`,
-        big: `${act.toFixed(0)}%`,
-        status: statusWord(act >= 85 ? 'elevated' : 'normal', {
-          normal: suspended ? 'Idle — runtime suspended' : 'Awake, mostly idle',
-          elevated: 'Sustained GPU load',
+        big: fmtIrq(irq),
+        status: statusWord(irq >= 3000 ? 'elevated' : 'normal', {
+          normal: idle ? 'Idle — no GPU client' : 'Active',
+          elevated: 'Heavy GPU load',
         }),
         chart: {
-          lines: [{ key: 'gpu_act', color: 'purple' }],
+          lines: [{ key: 'gpu_irq', color: 'purple', text: 'IRQ rate' }],
           fromZero: true,
           minSpan: 100,
-          format: (x) => `${x.toFixed(0)}%`,
+          format: (x) => fmtIrq(x),
         },
-        // 频率单独一张矮图：MHz 和 % 差两个数量级，画一起会互相压平
+        // 频率单独一张矮图：Hz 和 MHz 差六个数量级，画一起会互相压平
         miniChart: {
           title: 'Frequency',
           lines: [{ key: 'gpu_freq', color: 'cyan' }],
@@ -867,19 +877,10 @@ const METRICS = {
         },
         stats: false,
         averages: (series) => {
-          const a = series.gpu_act || [];
+          const a = series.gpu_irq || [];
           const f = series.gpu_freq || [];
-          // 每点代表 interval 秒，占比之和换算成"这一窗口里 GPU 醒着多久"。
-          // 不用"忙碌样本占比"，那和 Avg Active 在真机上基本是同一个数
-          // （每秒的占比非 0 即 100）。
-          const awake = avg(a) / 100 * a.length * (d.interval || 1);
-          // fmtDuration 最小单位是分钟（12 秒会显示成 "0m"），秒级单独处理
-          const awakeTxt = !a.length ? '—'
-            : awake >= 60 ? fmtDuration(awake)
-            : `${awake.toFixed(awake < 10 ? 1 : 0)}s`;   // 别把 0.5s 显示成 "0s"
           return [
-            ['Avg Active (5 min)', `${avg(a).toFixed(1)}%`],
-            ['Active Time (5 min)', awakeTxt],
+            ['Avg IRQ Rate (5 min)', fmtIrq(avg(a))],
             ['Avg Frequency (5 min)', `${avg(f).toFixed(0)} MHz`],
           ];
         },
@@ -892,8 +893,13 @@ const METRICS = {
             : '—'],
           ['Governor', `${g.governor} · ${g.polling_ms} ms`],
           ['Interrupts', `${g.irq} (${g.irq_rate.toFixed(1)}/s)`],
-          // 把"这个数到底是什么"直接写在界面上，别让人当成 SM 占用率
-          ['Measured As', 'Powered-on time (no SM counter)'],
+          // 参考行：runtime suspend 被刻意禁用时它恒 100%，别当占用率读
+          ['Powered-on', `${g.active_pct.toFixed(0)}% of window`],
+          ['Clients', g.client_count
+            ? `${g.client_count} · ${g.clients.join(', ')}${g.client_count > g.clients.length ? ' …' : ''}`
+            : 'None — idle'],
+          // 把"这个数到底是什么"直接写在界面上
+          ['Measured As', 'Job-completion IRQs per second'],
         ],
       };
     },
@@ -1470,7 +1476,7 @@ function openHistory() {
     ];
     // GPU 是可选装的：没有 GPU 的设备不加这两行，否则会多出一排恒为 0 的统计
     if (d.gpu && d.gpu.present) {
-      rowsFor.push(['GPU Active', 'gpu_act', (x) => `${x.toFixed(0)}%`]);
+      rowsFor.push(['GPU Activity', 'gpu_irq', (x) => fmtIrq(x)]);
       rowsFor.push(['GPU Frequency', 'gpu_freq', (x) => `${x.toFixed(0)} MHz`]);
     }
     card.innerHTML = rowsFor.map(([label, key, fmt, abs]) => {

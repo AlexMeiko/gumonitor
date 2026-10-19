@@ -99,7 +99,7 @@ UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页�
 | 卡片 | 数据来源 | 详情页 |
 | --- | --- | --- |
 | CPU Load | `/proc/stat` 每秒差值，逐核 + 总 | 总负载折线（阈值 80/95）+ 8 个核心卡（各自迷你折线）|
-| GPU | `devfreq/5000000.gpu` + `/proc/interrupts` 的 `gpu-irq` | **上电时间占比折线** + 频率副图 + 档位/governor/中断（见下）|
+| GPU | `devfreq/5000000.gpu` + `/proc/interrupts` 的 `gpu-irq` + DRM fdinfo 客户端 | **中断速率折线** + 频率副图 + 档位/governor/客户端（见下）|
 | Temperature | `thermal_zone0` = `pm8998-thermal` | 折线（应用阈值 65/80）+ 分区温度 + 内核 trip point（105/125 被动/临界）|
 | Memory | `/proc/meminfo` | 占用率折线 + Total/Used/Cached/Buffers/Swap + PSI |
 | Disk Usage | `statvfs('/' '/boot' '/data')` | 占用率折线 + 各挂载点用量 |
@@ -112,35 +112,39 @@ UI 参考 Open Pi 的风格：iOS 式分组卡片 + 实时折线图 + 详情页�
 此外 Memory 详情页带 **Zram**（压缩比/节省量/交换速率），Temperature 详情页带
 **IIO rradc** 的 skin / chg 温度点（`thermal_zone` 里只有 SoC 和电池两个）。
 
-### GPU：只有"上电时间占比"，没有占用率
+### GPU：拿不到占用率百分比，显示的是中断速率
 
 ![GPU 详情页](docs/screenshot-gpu.png)
 
+这台设备的 GPU 是 msm/freedreno（Adreno 530），**内核没有导出任何可用的占用率**。
+所有候选都实测过，下面是结论（省得后人再走一遍）：
 
-这台设备的 GPU 是 msm/freedreno（Adreno 530），**内核没有导出任何占用率**：
+| 候选 | 结论 |
+| --- | --- |
+| drm fdinfo 的 `drm-engine-gpu` | 字段存在（内核 6.18 的 msm 驱动），但**从不更新**：freedreno 硬件渲染 12000 帧/秒、连跑 12 秒，读数恒 0 |
+| devfreq `busy_time` / `total_time` | 不存在 |
+| `gpu_busy_percent` | 不存在（那是 drm/sched 给部分驱动才建的节点） |
+| devfreq `trans_stat` | 只在**发生变频时**结算上一段，频率一锁就完全不前进 |
+| runtime PM 上电时间占比 | 累计值实时前进，但 **runtime suspend 被禁用时恒 100%**（本项目就是特意把 GPU 钉住不挂起的场景），空载也显示 100% |
+| debugfs `/sys/kernel/debug/dri/0/gpu`（rbbm-status） | root-only，看板进程读不到 |
 
-* drm 设备下没有 `gpu_busy_percent`（那是 drm/sched 给部分驱动才建的节点）；
-* devfreq 只有频率与档位，没有 `busy_time` / `total_time`；
-* debugfs 里 `/sys/kernel/debug/dri/0/*` 是 root-only，且没有 load 计数；
-* `trans_stat` 只在**发生变频时**才结算上一段，长时间停在一档就不前进 ——
-  只能当"自开机累计驻留"看，拿两次差值当窗口分布是错的。
-
-能用的只有 **runtime PM 的上电时间占比**：
+所以主指标用 **`gpu-irq` 的作业完成中断速率**：GPU 每完成一批作业产生一次中断，
+实测空载 `0/s`、重载 `6k~12k/s`，频率也同步从 257 MHz 升到 596 MHz。
+它和"SM 占用率"不是一回事（每次中断对应的计算量不固定），界面上按**活动强度**呈现
+（`0/s` / `9.6k/s`），详情页有一行 `Measured As: Job-completion IRQs per second`
+说明口径 —— 不要写成 Utilization 百分比。
 
 ```
-active% = Δruntime_active_time / (Δruntime_active_time + Δruntime_suspended_time)
+irq_rate = Δgpu-irq / Δwall_clock        # 单位 Hz
 ```
 
-这两个累计毫秒数是**实时前进**的（实测每秒 +1000），所以每秒采样能算出窗口内的占比。
-GPU 空闲时会自动 runtime suspend，因此这个数低就说明确实没活；但"上电了还没派满"
-的那段时间也会算进来，所以它会**略高于**真占用率。
+另外还采集 **DRM 客户端列表**（扫 `/proc/*/fdinfo` 里的 `drm-client-id`，
+按 client-id 去重，避免同一 `drm_file` 的多个 fd 重复计数）：显示有几个进程
+开着 `/dev/dri/*`、分别是谁、占了多少显存。没有客户端就是真空载。
 
-因此界面上这个数一律叫 **Active**，详情页还有一行 `Measured As: Powered-on time
-(no SM counter)` —— 不要把它当成 SM 利用率展示。想拿真占用率需要在设备侧跑
-GL/EGL 采样（比如 `kmscube` + 读 GPU 计数器）或者给内核打补丁，都不在本项目的范围内。
-
-采集项还包括当前/最高频率（7 档：257–710 MHz）、`simple_ondemand` governor、
-`gpu-irq` 中断计数与速率。**没有 GPU 的设备整块隐藏**，不会留一块永远显示 `—` 的磁贴。
+频率/档位/governor、`gpu-irq` 累计数、runtime PM 上电占比都作为参考行保留
+（上电占比在 runtime suspend 被禁用时恒 100%，仅表示"GPU 一直通着电"）。
+**没有 GPU 的设备整块隐藏**，不会留一块永远显示 `—` 的磁贴。
 
 ### 存储 I/O 只统计 `sda`
 

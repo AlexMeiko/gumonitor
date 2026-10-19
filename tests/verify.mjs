@@ -22,7 +22,21 @@ const STATE = process.env.STATE
   ? path.resolve(process.env.STATE)
   : (fs.existsSync(STATE_LOCAL) ? STATE_LOCAL : path.join(HERE, 'state.sample.json'));
 const OUT = path.join(HERE, 'shots');
-const BIG = path.join(HERE, '.tmp');
+// 浏览器 profile 必须放在支持 symlink 的文件系统上：Chromium 的
+// ProcessSingleton 要建 SingletonLock 符号链接，而 NTFS/ntfs3 建不了
+// （Failed to create SingletonLock: 没有那个文件或目录，浏览器直接
+// 以 exitCode=21 退出）。所以 TMPDIR 指到 /tmp（tmpfs/ext4），
+// HOME/XDG_RUNTIME_DIR 留在大盘上即可 —— 它们只是可写目录，无所谓文件系统。
+const BIG = fs.existsSync('/tmp') && (() => {
+  try {
+    fs.mkdirSync('/tmp/v30-verify', { recursive: true });
+    fs.symlinkSync('probe', '/tmp/v30-verify/.symlink-probe');
+    fs.unlinkSync('/tmp/v30-verify/.symlink-probe');
+    return '/tmp/v30-verify';
+  } catch {
+    return path.join(HERE, '.tmp');
+  }
+})();
 
 fs.mkdirSync(path.join(BIG, 'home'), { recursive: true });
 fs.mkdirSync(OUT, { recursive: true });
@@ -357,8 +371,8 @@ console.log('Edge version =', browser.version(), '\n');
   const cur = rows.find((r) => r.k === 'Battery Current');
   check('统计面板有 Battery Current 行', !!cur, cur ? cur.v : '(缺)');
   // GPU 是可选装的：有 GPU 时才多这两行
-  const gpuAct = rows.find((r) => r.k === 'GPU Active');
-  check('统计面板有 GPU Active 与 GPU Frequency 两行',
+  const gpuAct = rows.find((r) => r.k === 'GPU Activity');
+  check('统计面板有 GPU Activity 与 GPU Frequency 两行',
         !!gpuAct && rows.some((r) => r.k === 'GPU Frequency'),
         gpuAct ? gpuAct.v : '(缺)');
 
@@ -480,7 +494,7 @@ console.log('Edge version =', browser.version(), '\n');
         names.includes('Storage I/O') && names.includes('Link Quality'), names.join(' / '));
   check('首页有 GPU 磁贴', names.includes('GPU'), names.join(' / '));
 
-  // GPU 磁贴：大字 = 上电时间占比，灰字 = 当前频率
+  // GPU 磁贴：大字 = 中断速率（活动强度），灰字 = 当前频率
   const gpuTile = await page.evaluate(() => {
     const t = Array.from(document.querySelectorAll('.tile'))
       .find((e) => e.querySelector('.name')?.textContent.trim() === 'GPU');
@@ -491,8 +505,8 @@ console.log('Edge version =', browser.version(), '\n');
       shown: getComputedStyle(t).display !== 'none',
     };
   });
-  check('GPU 磁贴显示占比与频率', !!gpuTile && gpuTile.shown &&
-        /%$/.test(gpuTile.value || '') && /MHz$/.test(gpuTile.badge || ''),
+  check('GPU 磁贴显示中断速率与频率', !!gpuTile && gpuTile.shown &&
+        /\/s$/.test(gpuTile.value || '') && /MHz$/.test(gpuTile.badge || ''),
         gpuTile ? `${gpuTile.value} · ${gpuTile.badge}` : '(缺 GPU 磁贴)');
 
   const rows = () => page.evaluate(() => Array.from(
@@ -539,14 +553,14 @@ console.log('Edge version =', browser.version(), '\n');
   check('GPU 有频率档位与 governor',
         !!findRow(gpuRows, 'Frequency Steps') && !!findRow(gpuRows, 'Governor'),
         `${findRow(gpuRows, 'Frequency Steps')?.v} · ${findRow(gpuRows, 'Governor')?.v}`);
-  // 这台机器上没有 SM 占用率传感器，读数是"上电时间占比"。
-  // 这行是防误导的护栏：谁把它改成 Utilization 就该失败。
-  check('GPU 标明了读数含义（不是 SM 占用率）',
-        /powered-on/i.test(findRow(gpuRows, 'Measured As')?.v || ''),
+  // 读数口径必须写在界面上：作业完成中断速率，不是占用率百分比。
+  // 这行是防误导的护栏：口径换了这里就该失败。
+  check('GPU 标明了读数含义（中断速率，不是占用率）',
+        /irq/i.test(findRow(gpuRows, 'Measured As')?.v || ''),
         findRow(gpuRows, 'Measured As')?.v || '(缺)');
   const gpuCharts = await page.evaluate(() =>
     document.querySelectorAll('#detail .chart-card .chart-svg').length);
-  check('GPU 详情页有占比主图 + 频率副图', gpuCharts === 2, `chart-svg=${gpuCharts}`);
+  check('GPU 详情页有活动强度主图 + 频率副图', gpuCharts === 2, `chart-svg=${gpuCharts}`);
   await page.screenshot({ path: path.join(OUT, 'pw-detail-gpu.png') });
   await closeTile();
 

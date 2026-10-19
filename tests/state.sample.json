@@ -289,6 +289,18 @@
    0.0,
    1.0,
    0.0
+  ],
+  "gpu_irq": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   6123.0,
+   8421.0,
+   7350.0
   ]
  },
  "history_len": {
@@ -315,7 +327,8 @@
   "core4": 300,
   "core5": 300,
   "core6": 300,
-  "core7": 300
+  "core7": 300,
+  "gpu_irq": 300
  },
  "ts": 1791401152.4860432,
  "interval": 1.0,
@@ -628,8 +641,14 @@
   ],
   "state": "active",
   "active_pct": 100.0,
-  "irq": 98,
-  "irq_rate": 0.0,
+  "clients": [
+   "weston",
+   "chromium"
+  ],
+  "client_count": 5,
+  "client_mem_kib": 34936,
+  "irq": 179696,
+  "irq_rate": 7350.0,
   "_act": 3808,
   "_sus": 536348
  },
